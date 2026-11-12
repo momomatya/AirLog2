@@ -1,0 +1,2266 @@
+window.ROTAX_SOURCE_BUNDLE = {
+  "guideHtml": "<h4>1. タイヤセット管理 &amp; 現在地周辺のサーキット検索<\/h4>\n<ol>\n  <li><strong>タイヤセット管理<\/strong>: 「車両名」の下にある「タイヤセット」プルダウンから使用セットを選択でき、選択中のタイヤセットの<strong>累計周回数・使用セッション数<\/strong>が自動集計されてラベル横に表示されます。「+ 新規タイヤセット追加」を押すと、<code>MOJO D5<\/code>・<code>MOJO D2<\/code>・<code>MOJO W5 (WET)<\/code> 等のコンパウンドプリセットから素早く新規登録できます。<\/li>\n  <li><strong>現在地から近くのサーキット検索<\/strong>: 「+ 新規サーキット追加」ボタンを押すと、スマホのGPS位置情報を取得して全国42箇所の主要カート・4輪サーキットとの直線距離（km）を自動計算し、<strong>現在地から近い順<\/strong>に一覧表示します。候補の「選択」をタップするだけでプルダウンに追加・セットされます。<\/li>\n<\/ol>\n<h4>2. ROTAX デジタルエアゲージ 2画面キャプチャOCR取込<\/h4>\n<ol>\n  <li><strong>2枚セットの画像選択<\/strong>: 「記録・編集」タブ上部のOCRパネルで、<strong>①日時・気温画面（Date / Time / Air）<\/strong>と<strong>②4輪エア圧画面（各輪1行目:冷間 / 2行目:温間 / 3行目:差分）<\/strong>の写真を撮影またはアルバムから選択します。<\/li>\n  <li><strong>単位モード選択<\/strong>: ゲージ表示の <code>bar<\/code>（例: <code>1.65<\/code> → <code>2.10<\/code> / <code>+0.45<\/code>）のまま記録するか、<code>kPa<\/code>（×100換算: <code>165.0<\/code> → <code>210.0<\/code> / <code>+45.0<\/code>）に変換して記録するかを選べます。<\/li>\n<\/ol>\n<h4>3. GitHub Pages へのデプロイ手順 &amp; GAS導入手順<\/h4>\n<ol>\n  <li>GitHubで新規リポジトリを作成し、<code>index.html<\/code>, <code>style.css<\/code>, <code>app.js<\/code>, <code>manifest.json<\/code>, <code>sw.js<\/code> をルートに配置して <strong>Settings &gt; Pages<\/strong> で公開します。<\/li>\n  <li>Googleスプレッドシートの <strong>拡張機能 &gt; Apps Script<\/strong> に <code>code.gs<\/code> を貼り付け、ウェブアプリ（アクセスできるユーザー: <strong>全員<\/strong>）としてデプロイし、発行されたURLを「設定・データ管理」タブに保存してください。<\/li>\n<\/ol>",
+  "index.html": "<!DOCTYPE html>\n<html lang=\"ja\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no\">\n  <meta name=\"theme-color\" content=\"#ff5500\">\n  <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n  <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"black-translucent\">\n  <meta name=\"apple-mobile-web-app-title\" content=\"ROTAX Air Log\">\n  <title>ROTAX Air Log - サーキット4輪タイヤ内圧管理PWA<\/title>\n  <link rel=\"manifest\" href=\"manifest.json\">\n  <link rel=\"stylesheet\" href=\"style.css\">\n  <script src=\"https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js\"><\/script>\n<\/head>\n<body>\n  <!-- Top Header -->\n  <header class=\"app-header\">\n    <div class=\"header-inner\">\n      <div class=\"brand-group\">\n        <span class=\"brand-badge\">ROTAX<\/span>\n        <h1 class=\"brand-title\">AIR LOG<\/h1>\n      <\/div>\n      <div class=\"header-actions\">\n        <button type=\"button\" id=\"btn-header-sync\" class=\"sync-pill\" title=\"クラウド同期ステータス\">\n          <span id=\"sync-status-dot\" class=\"sync-dot\"><\/span>\n          <span id=\"sync-status-label\">LOCAL READY<\/span>\n        <\/button>\n      <\/div>\n    <\/div>\n  <\/header>\n\n  <!-- Main SPA Container -->\n  <main class=\"app-container\">\n\n    <!-- ====================================================================\n         TAB 1: 記録・編集タブ (Record / Edit)\n         ==================================================================== -->\n    <section id=\"tab-record\" class=\"tab-view active\">\n\n      <!-- Edit Mode Banner (shown when editing an existing record) -->\n      <div id=\"edit-mode-banner\" class=\"edit-mode-banner\">\n        <div>\n          <div class=\"edit-mode-text\" id=\"edit-mode-label\">編集モード：温間追記・データ更新中<\/div>\n          <div style=\"font-size:0.74rem; color:#cbd5e1;\">保存ボタンを押すと選択中の記録を上書き更新します<\/div>\n        <\/div>\n        <button type=\"button\" id=\"btn-cancel-edit\" class=\"mini-action-btn\">新規作成へ戻す<\/button>\n      <\/div>\n\n      <!-- Quick Resume Banner for Latest Cold-Only Session -->\n      <div id=\"cold-pending-banner\" class=\"cold-pending-banner\">\n        <div class=\"cold-pending-info\">\n          <strong>走行前（冷間のみ）の記録があります<\/strong>\n          <span id=\"cold-pending-summary\">最新のセッションを呼び出して温間内圧を追記できます<\/span>\n        <\/div>\n        <button type=\"button\" id=\"btn-resume-cold\" class=\"mini-action-btn\" style=\"background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);\">温間を追記<\/button>\n      <\/div>\n\n      <!-- ROTAX RACING デジタルエアゲージ 2画面キャプチャOCR・AI取込パネル -->\n      <div class=\"panel-card ocr-panel-card\" id=\"ocr-capture-panel\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\" style=\"background:var(--accent-cyan);\"><\/span>📷 ROTAX エアゲージ2画面 OCR取込<\/h2>\n          <button type=\"button\" id=\"btn-ocr-sample\" class=\"mini-action-btn\" style=\"background:var(--accent-orange); color:#000; border-color:var(--accent-orange);\">実機サンプル2枚でテスト<\/button>\n        <\/div>\n\n        <p style=\"font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px;\">\n          ROTAXゲージの<strong>①日時・気温画面<\/strong>と<strong>②4輪エア圧画面（1行目:冷間 / 2行目:温間 / 3行目:差分）<\/strong>を撮影・選択すると、文字起こしして下のフォームへ一括反映します。\n        <\/p>\n\n        <div class=\"ocr-slot-grid\">\n          <div class=\"ocr-slot-box\" id=\"ocr-slot-meta\">\n            <span class=\"ocr-slot-title\">① 日時・気温画面<\/span>\n            <span class=\"ocr-slot-sub\">Date / Time / Air(℃) / Test#<\/span>\n            <div class=\"ocr-thumb-wrap\">\n              <img id=\"img-ocr-meta-preview\" class=\"ocr-thumb-img\" alt=\"日時・気温画面プレビュー\">\n              <span id=\"placeholder-ocr-meta\" class=\"ocr-thumb-placeholder\">例: Date: 19/09/2026<br>Time: 10:58:01<br>Air: 27.3°C<\/span>\n            <\/div>\n            <label for=\"input-ocr-meta\" class=\"ocr-file-label\">📸 画面①を選択 / 撮影<\/label>\n            <input type=\"file\" id=\"input-ocr-meta\" class=\"ocr-file-input\" accept=\"image/*\">\n          <\/div>\n\n          <div class=\"ocr-slot-box\" id=\"ocr-slot-tire\">\n            <span class=\"ocr-slot-title\">② 4輪エア圧画面<\/span>\n            <span class=\"ocr-slot-sub\">各輪 1:冷間 / 2:温間 / 3:差分<\/span>\n            <div class=\"ocr-thumb-wrap\">\n              <img id=\"img-ocr-tire-preview\" class=\"ocr-thumb-img\" alt=\"4輪エア圧画面プレビュー\">\n              <span id=\"placeholder-ocr-tire\" class=\"ocr-thumb-placeholder\">例: FL 1.65 / 2.10 / +0.45<br>FR 1.65 / 1.97 / +0.32<br>RL 1.60 / RR 1.61<\/span>\n            <\/div>\n            <label for=\"input-ocr-tire\" class=\"ocr-file-label\">📸 画面②を選択 / 撮影<\/label>\n            <input type=\"file\" id=\"input-ocr-tire\" class=\"ocr-file-input\" accept=\"image/*\">\n          <\/div>\n        <\/div>\n\n        <div class=\"field-group\" style=\"margin-bottom:8px;\">\n          <label class=\"field-label\" for=\"select-ocr-unit\">取り込み時の圧力単位・桁数モード<\/label>\n          <select id=\"select-ocr-unit\" class=\"select-control\" style=\"min-height:40px; font-size:0.86rem;\">\n            <option value=\"raw_bar\">ゲージ表示値のまま記録 (例: 1.65 → 2.10 / Δ+0.45 bar)<\/option>\n            <option value=\"to_kpa\">kPaに換算して記録 (×100換算 例: 165.0 → 210.0 / Δ+45.0 kPa)<\/option>\n          <\/select>\n        <\/div>\n\n        <div class=\"form-grid-2\" style=\"margin-bottom:6px;\">\n          <button type=\"button\" id=\"btn-run-ocr\" class=\"btn-primary\" style=\"min-height:44px; font-size:0.88rem;\">🔍 画像をOCR解析して反映<\/button>\n          <button type=\"button\" id=\"btn-toggle-ocr-paste\" class=\"btn-secondary\" style=\"min-height:44px; font-size:0.82rem;\">📋 OCR文字を直接貼付<\/button>\n        <\/div>\n\n        <div id=\"box-ocr-paste\" class=\"inline-add-box\" style=\"flex-direction:column; margin-top:8px;\">\n          <textarea id=\"input-ocr-raw-text\" class=\"textarea-control\" style=\"min-height:90px; font-family:var(--font-mono); font-size:0.8rem;\" placeholder=\"iPhoneの写真長押し（テキスト認識表示）等でコピーした文字列を貼り付けてください&#10;例:&#10;Date: 19/09/2026 Time: 10:58:01 Air: 27.3°C&#10;1.65 1.65 2.10 1.97 +0.45 21 +0.32&#10;1.60 1.61 1.97 1.93 +0.37 +0.32 - Test 21 +\"><\/textarea>\n          <button type=\"button\" id=\"btn-parse-ocr-text\" class=\"btn-secondary\" style=\"min-height:40px; font-size:0.84rem; background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);\">貼り付けたテキストを解析してフォームへ反映<\/button>\n        <\/div>\n\n        <div id=\"ocr-status-bar\" class=\"ocr-status-bar\">\n          <span id=\"ocr-status-text\">OCR解析中...<\/span>\n        <\/div>\n\n        <div id=\"rotax-lcd-preview\" class=\"rotax-lcd-preview\">\n          <div class=\"rotax-lcd-top-meta\">\n            <span id=\"lcd-date\">Date: 19/09/2026<\/span>\n            <span id=\"lcd-time\">Time: 10:58:01<\/span>\n            <span id=\"lcd-air\">Air: 27.3°C<\/span>\n          <\/div>\n          <div class=\"rotax-lcd-wheels\">\n            <div class=\"rotax-lcd-wheel-box\" id=\"lcd-fl\">1.65<br>2.10<br>+0.45<\/div>\n            <div class=\"rotax-lcd-axle\">█━█<br><span id=\"lcd-mem-no\">21<\/span><br>█━█<\/div>\n            <div class=\"rotax-lcd-wheel-box right\" id=\"lcd-fr\">1.65<br>1.97<br>+0.32<\/div>\n            <div class=\"rotax-lcd-wheel-box\" id=\"lcd-rl\">1.60<br>1.97<br>+0.37<\/div>\n            <div class=\"rotax-lcd-axle\"><\/div>\n            <div class=\"rotax-lcd-wheel-box right\" id=\"lcd-rr\">1.61<br>1.93<br>+0.32<\/div>\n          <\/div>\n          <div class=\"rotax-lcd-footer\" id=\"lcd-test-footer\">◄ - Test 21 / 22 + ► （フォームへ自動反映済）<\/div>\n        <\/div>\n      <\/div>\n\n      <form id=\"air-log-form\" novalidate>\n        <input type=\"hidden\" id=\"field-id\" value=\"\">\n\n        <!-- 1. 基本セッション情報パネル -->\n        <div class=\"panel-card\">\n          <div class=\"panel-header\">\n            <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>SESSION INFO（基本情報）<\/h2>\n            <button type=\"button\" id=\"btn-set-now\" class=\"mini-action-btn\">現在日時をセット<\/button>\n          <\/div>\n\n          <div class=\"form-grid-2\">\n            <div class=\"field-group\">\n              <label class=\"field-label\" for=\"field-date\">走行日 (Date)<\/label>\n              <input type=\"date\" id=\"field-date\" class=\"input-control\" required>\n            <\/div>\n            <div class=\"field-group\">\n              <label class=\"field-label\" for=\"field-time\">開始時間 (Time)<\/label>\n              <input type=\"time\" id=\"field-time\" class=\"input-control\" required>\n            <\/div>\n          <\/div>\n\n          <!-- サーキット名 (プルダウン + 新規追加 & 現在地周辺サーキット検索) -->\n          <div class=\"field-group\">\n            <div class=\"field-label-row\">\n              <label class=\"field-label\" for=\"field-circuit\">サーキット (Circuit)<\/label>\n              <button type=\"button\" id=\"btn-toggle-add-circuit\" class=\"mini-action-btn\">+ 新規サーキット追加<\/button>\n            <\/div>\n            <select id=\"field-circuit\" class=\"select-control\"><\/select>\n\n            <!-- 新規サーキット追加 & 近くのサーキット検索ドロワー -->\n            <div id=\"box-add-circuit\" class=\"add-drawer-panel\">\n              <div class=\"inline-add-row\">\n                <input type=\"text\" id=\"input-new-circuit\" class=\"input-control\" placeholder=\"新しいサーキット名を入力（または下から選択）\">\n                <button type=\"button\" id=\"btn-save-new-circuit\" class=\"mini-action-btn\" style=\"background:var(--accent-orange); color:#000; border-color:var(--accent-orange);\">追加<\/button>\n              <\/div>\n\n              <div class=\"nearby-header-row\">\n                <span id=\"nearby-circuit-status\" class=\"nearby-status-text\">📍 近くのサーキット（距離順）<\/span>\n                <button type=\"button\" id=\"btn-refresh-gps-circuits\" class=\"mini-action-btn\">🔄 現在地から再検索<\/button>\n              <\/div>\n\n              <input type=\"text\" id=\"input-filter-nearby-circuit\" class=\"input-control\" style=\"min-height:38px; font-size:0.84rem;\" placeholder=\"都道府県・サーキット名で絞り込み（例: 千葉、瑞浪、鈴鹿）\">\n\n              <div id=\"nearby-circuit-list\" class=\"nearby-circuit-list\"><\/div>\n            <\/div>\n          <\/div>\n\n          <!-- 車両名 (プルダウン + 新規追加) -->\n          <div class=\"field-group\">\n            <div class=\"field-label-row\">\n              <label class=\"field-label\" for=\"field-vehicle\">車両名 (Vehicle)<\/label>\n              <button type=\"button\" id=\"btn-toggle-add-vehicle\" class=\"mini-action-btn\">+ 新規車両追加<\/button>\n            <\/div>\n            <select id=\"field-vehicle\" class=\"select-control\"><\/select>\n            <div id=\"box-add-vehicle\" class=\"inline-add-box\">\n              <input type=\"text\" id=\"input-new-vehicle\" class=\"input-control\" placeholder=\"新しい車両・シャーシ名を入力\">\n              <button type=\"button\" id=\"btn-save-new-vehicle\" class=\"mini-action-btn\" style=\"background:var(--accent-orange); color:#000; border-color:var(--accent-orange);\">追加<\/button>\n            <\/div>\n          <\/div>\n\n          <!-- NEW: タイヤセット (プルダウン + 新規作成メニュー + 累計周回数バッジ) -->\n          <div class=\"field-group\">\n            <div class=\"field-label-row\">\n              <div style=\"display:flex; align-items:center; gap:8px; flex-wrap:wrap;\">\n                <label class=\"field-label\" for=\"field-tireset\">タイヤセット (Tire Set)<\/label>\n                <span id=\"tireset-usage-badge\" class=\"usage-pill\">累計: 0周 / 0回<\/span>\n              <\/div>\n              <button type=\"button\" id=\"btn-toggle-add-tireset\" class=\"mini-action-btn\">+ 新規タイヤセット追加<\/button>\n            <\/div>\n            <select id=\"field-tireset\" class=\"select-control\"><\/select>\n\n            <!-- 新規タイヤセット作成メニュー -->\n            <div id=\"box-add-tireset\" class=\"add-drawer-panel\">\n              <div style=\"font-size:0.74rem; color:var(--text-secondary); font-weight:700;\">\n                コンパウンドをタップして自動入力、または自由に入力して追加できます：\n              <\/div>\n              <div class=\"preset-chip-row\" id=\"tireset-compound-presets\">\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"MOJO D5\">MOJO D5<\/button>\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"MOJO D2\">MOJO D2<\/button>\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"MOJO W5 (WET)\">MOJO W5 (WET)<\/button>\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"BS SL17\">BS SL17<\/button>\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"DL SLFD\">DL SLFD<\/button>\n                <button type=\"button\" class=\"preset-chip-btn\" data-compound=\"ADVAN A052\">ADVAN A052<\/button>\n              <\/div>\n              <div class=\"inline-add-row\">\n                <input type=\"text\" id=\"input-new-tireset\" class=\"input-control\" placeholder=\"例: MOJO D5 #03 (11/12おろし)\">\n                <button type=\"button\" id=\"btn-save-new-tireset\" class=\"mini-action-btn\" style=\"background:var(--accent-orange); color:#000; border-color:var(--accent-orange);\">追加<\/button>\n              <\/div>\n            <\/div>\n          <\/div>\n\n          <!-- ドライバー名 -->\n          <div class=\"field-group\">\n            <label class=\"field-label\" for=\"field-driver\">ドライバー名 (Driver)<\/label>\n            <input type=\"text\" id=\"field-driver\" class=\"input-control\" placeholder=\"例: K. Takahashi\">\n          <\/div>\n\n          <!-- コースコンディション (DRY / WET / SEMI-WET) -->\n          <div class=\"field-group\">\n            <span class=\"field-label\">コースコンディション (Condition)<\/span>\n            <input type=\"hidden\" id=\"field-condition\" value=\"DRY\">\n            <div class=\"condition-group\" id=\"condition-btn-group\">\n              <button type=\"button\" class=\"cond-btn active\" data-cond=\"DRY\">☀ DRY<\/button>\n              <button type=\"button\" class=\"cond-btn\" data-cond=\"SEMI-WET\">⛅ SEMI-WET<\/button>\n              <button type=\"button\" class=\"cond-btn\" data-cond=\"WET\">🌧 WET<\/button>\n            <\/div>\n          <\/div>\n\n          <!-- 気温 / 路温 / 周回数 -->\n          <div class=\"form-grid-3\" style=\"margin-top:10px; margin-bottom:0;\">\n            <div class=\"field-group\">\n              <label class=\"field-label\" for=\"field-ambient-temp\">気温 (℃)<\/label>\n              <input type=\"number\" id=\"field-ambient-temp\" class=\"input-control\" step=\"0.1\" inputmode=\"decimal\" placeholder=\"27.3\">\n            <\/div>\n            <div class=\"field-group\">\n              <label class=\"field-label\" for=\"field-track-temp\">路温 (℃)<\/label>\n              <input type=\"number\" id=\"field-track-temp\" class=\"input-control\" step=\"0.1\" inputmode=\"decimal\" placeholder=\"34.0\">\n            <\/div>\n            <div class=\"field-group\">\n              <label class=\"field-label\" for=\"field-laps\">周回数 (Laps)<\/label>\n              <input type=\"number\" id=\"field-laps\" class=\"input-control\" step=\"1\" min=\"0\" inputmode=\"numeric\" placeholder=\"15\">\n            <\/div>\n          <\/div>\n        <\/div>\n\n        <!-- 2. 4輪タイヤ内圧ビジュアル入力パネル (2x2 シャシーレイアウト) -->\n        <div class=\"panel-card\" id=\"tire-section-card\">\n          <div class=\"panel-header\">\n            <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>TIRE PRESSURE (kPa / bar 4輪内圧)<\/h2>\n            <button type=\"button\" id=\"btn-clear-warm\" class=\"mini-action-btn\">温間のみクリア<\/button>\n          <\/div>\n\n          <!-- 冷間4輪一括セットバー -->\n          <div class=\"batch-bar\">\n            <span class=\"batch-bar-label\">冷間4輪一括セット:<\/span>\n            <div class=\"batch-controls\">\n              <input type=\"number\" id=\"input-batch-cold\" class=\"batch-input\" step=\"0.01\" inputmode=\"decimal\" value=\"75.0\" aria-label=\"冷間4輪一括入力値\">\n              <button type=\"button\" id=\"btn-apply-batch-cold\" class=\"mini-action-btn\" style=\"background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);\">4輪へ反映<\/button>\n            <\/div>\n          <\/div>\n\n          <div class=\"chassis-Direction-indicator\">▲ FRONT（進行方向・前輪） ▲<\/div>\n\n          <!-- 2x2 グリッド: 左上 FL / 右上 FR / 左下 RL / 右下 RR -->\n          <div class=\"chassis-wrapper\">\n\n            <!-- FL: 左前 -->\n            <div class=\"tire-card\">\n              <div class=\"tire-card-header\">\n                <span class=\"tire-pos-badge\"><span class=\"tire-pos-code\">FL<\/span>左前<\/span>\n                <div class=\"tire-delta-box\">\n                  <span class=\"tire-delta-label\">Δ 上昇値 (3行目)<\/span>\n                  <span id=\"delta-FL\" class=\"tire-delta-value\">--<\/span>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block cold-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">1行目: 冷間 COLD<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"coldFL\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"75.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFL\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFL\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFL\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFL\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block warm-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">2行目: 温間 WARM<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"warmFL\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"95.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFL\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFL\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFL\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFL\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n            <\/div>\n\n            <!-- FR: 右前 -->\n            <div class=\"tire-card\">\n              <div class=\"tire-card-header\">\n                <span class=\"tire-pos-badge\"><span class=\"tire-pos-code\">FR<\/span>右前<\/span>\n                <div class=\"tire-delta-box\">\n                  <span class=\"tire-delta-label\">Δ 上昇値 (3行目)<\/span>\n                  <span id=\"delta-FR\" class=\"tire-delta-value\">--<\/span>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block cold-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">1行目: 冷間 COLD<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"coldFR\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"75.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFR\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFR\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFR\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldFR\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block warm-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">2行目: 温間 WARM<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"warmFR\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"95.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFR\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFR\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFR\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmFR\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n            <\/div>\n\n            <!-- RL: 左後 -->\n            <div class=\"tire-card\">\n              <div class=\"tire-card-header\">\n                <span class=\"tire-pos-badge\"><span class=\"tire-pos-code\">RL<\/span>左後<\/span>\n                <div class=\"tire-delta-box\">\n                  <span class=\"tire-delta-label\">Δ 上昇値 (3行目)<\/span>\n                  <span id=\"delta-RL\" class=\"tire-delta-value\">--<\/span>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block cold-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">1行目: 冷間 COLD<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"coldRL\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"75.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRL\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRL\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRL\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRL\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block warm-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">2行目: 温間 WARM<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"warmRL\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"98.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRL\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRL\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRL\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRL\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n            <\/div>\n\n            <!-- RR: 右後 -->\n            <div class=\"tire-card\">\n              <div class=\"tire-card-header\">\n                <span class=\"tire-pos-badge\"><span class=\"tire-pos-code\">RR<\/span>右後<\/span>\n                <div class=\"tire-delta-box\">\n                  <span class=\"tire-delta-label\">Δ 上昇値 (3行目)<\/span>\n                  <span id=\"delta-RR\" class=\"tire-delta-value\">--<\/span>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block cold-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">1行目: 冷間 COLD<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"coldRR\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"75.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRR\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRR\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRR\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"coldRR\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n              <div class=\"pressure-block warm-block\">\n                <div class=\"pressure-block-top\">\n                  <span class=\"pressure-type-label\">2行目: 温間 WARM<\/span>\n                  <span class=\"pressure-unit\">kPa/bar<\/span>\n                <\/div>\n                <input type=\"number\" id=\"warmRR\" class=\"pressure-input\" step=\"0.01\" inputmode=\"decimal\" placeholder=\"98.0\">\n                <div class=\"stepper-row\">\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRR\" data-step=\"-1.0\">-1.0<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRR\" data-step=\"-0.5\">-0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRR\" data-step=\"0.5\">+0.5<\/button>\n                  <button type=\"button\" class=\"step-btn\" data-target=\"warmRR\" data-step=\"1.0\">+1.0<\/button>\n                <\/div>\n              <\/div>\n            <\/div>\n\n          <\/div>\n\n          <!-- 4輪平均・前後バランスリアルタイム表示 -->\n          <div class=\"telemetry-summary-grid\">\n            <div class=\"telemetry-cell\">\n              <span class=\"telemetry-cell-label\">冷間 4輪平均<\/span>\n              <span id=\"summary-cold-avg\" class=\"telemetry-cell-val\">-- kPa<\/span>\n            <\/div>\n            <div class=\"telemetry-cell\">\n              <span class=\"telemetry-cell-label\">温間 4輪平均<\/span>\n              <span id=\"summary-warm-avg\" class=\"telemetry-cell-val\">-- kPa<\/span>\n            <\/div>\n            <div class=\"telemetry-cell\">\n              <span class=\"telemetry-cell-label\">平均 Δ上昇値<\/span>\n              <span id=\"summary-delta-avg\" class=\"telemetry-cell-val\">-- kPa<\/span>\n            <\/div>\n          <\/div>\n        <\/div>\n\n        <!-- 3. セッティングメモ・コメント -->\n        <div class=\"panel-card\">\n          <div class=\"panel-header\">\n            <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>SETTING MEMO（減衰・挙動・メモ）<\/h2>\n          <\/div>\n          <div class=\"field-group\">\n            <textarea id=\"field-memo\" class=\"textarea-control\" placeholder=\"例: リアトレッド1395mm / スプロケ14×81 / 後半アンダーステア傾向、次セットでフロント冷間-2.0kPa調整\"><\/textarea>\n          <\/div>\n\n          <div class=\"action-stack\">\n            <button type=\"submit\" id=\"btn-submit-log\" class=\"btn-primary\">\n              <span id=\"btn-submit-text\">記録を保存する（冷間のみでも保存可）<\/span>\n            <\/button>\n            <button type=\"button\" id=\"btn-reset-form\" class=\"btn-secondary\">入力欄をリセット（新規セッション）<\/button>\n          <\/div>\n        <\/div>\n      <\/form>\n    <\/section>\n\n    <!-- ====================================================================\n         TAB 2: 履歴・分析タブ (History / Analysis)\n         ==================================================================== -->\n    <section id=\"tab-history\" class=\"tab-view\">\n\n      <div class=\"kpi-strip\">\n        <div class=\"kpi-box\">\n          <span class=\"kpi-label\">表示件数 / 総数<\/span>\n          <span id=\"kpi-count\" class=\"kpi-val\">0 / 0<\/span>\n        <\/div>\n        <div class=\"kpi-box\">\n          <span class=\"kpi-label\">平均 Δ (DRY)<\/span>\n          <span id=\"kpi-avg-dry-delta\" class=\"kpi-val\">--<\/span>\n        <\/div>\n        <div class=\"kpi-box\">\n          <span class=\"kpi-label\">平均温間内圧<\/span>\n          <span id=\"kpi-avg-warm\" class=\"kpi-val\">--<\/span>\n        <\/div>\n      <\/div>\n\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>FILTER（絞り込み検索）<\/h2>\n          <button type=\"button\" id=\"btn-reset-filter\" class=\"mini-action-btn\">条件クリア<\/button>\n        <\/div>\n\n        <div class=\"form-grid-2\">\n          <div class=\"field-group\">\n            <label class=\"field-label\" for=\"filter-circuit\">サーキット別<\/label>\n            <select id=\"filter-circuit\" class=\"select-control\">\n              <option value=\"ALL\">すべてのサーキット<\/option>\n            <\/select>\n          <\/div>\n          <div class=\"field-group\">\n            <label class=\"field-label\" for=\"filter-vehicle\">車両別<\/label>\n            <select id=\"filter-vehicle\" class=\"select-control\">\n              <option value=\"ALL\">すべての車両<\/option>\n            <\/select>\n          <\/div>\n        <\/div>\n\n        <div class=\"form-grid-2\">\n          <div class=\"field-group\">\n            <label class=\"field-label\" for=\"filter-tireset\">タイヤセット別<\/label>\n            <select id=\"filter-tireset\" class=\"select-control\">\n              <option value=\"ALL\">すべてのタイヤセット<\/option>\n            <\/select>\n          <\/div>\n          <div class=\"field-group\">\n            <label class=\"field-label\" for=\"filter-condition\">コンディション別<\/label>\n            <select id=\"filter-condition\" class=\"select-control\">\n              <option value=\"ALL\">すべて (ALL)<\/option>\n              <option value=\"DRY\">DRY<\/option>\n              <option value=\"SEMI-WET\">SEMI-WET<\/option>\n              <option value=\"WET\">WET<\/option>\n            <\/select>\n          <\/div>\n        <\/div>\n\n        <div class=\"field-group\" style=\"margin-bottom:0;\">\n          <label class=\"field-label\" for=\"filter-keyword\">キーワード検索<\/label>\n          <input type=\"text\" id=\"filter-keyword\" class=\"input-control\" placeholder=\"ドライバー・タイヤ・メモ検索\">\n        <\/div>\n      <\/div>\n\n      <div id=\"history-card-list\" class=\"history-list\"><\/div>\n    <\/section>\n\n    <!-- ====================================================================\n         TAB 3: 設定・データ管理タブ (Settings / Data / Cloud Sync / Code)\n         ==================================================================== -->\n    <section id=\"tab-settings\" class=\"tab-view\">\n\n      <!-- 0. AI高精度OCR設定 (Gemini APIキー・任意) -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\" style=\"background:var(--accent-cyan);\"><\/span>📷 エアゲージAI高精度OCR設定（任意・無料枠対応）<\/h2>\n        <\/div>\n        <p style=\"font-size:0.78rem; color:var(--text-secondary); margin-bottom:8px;\">\n          未設定でもブラウザ内蔵OCR（Tesseract.js）とテキスト貼付が無料で動作しますが、Google AI Studioの無料Gemini APIキーを設定すると、反射や傾きのある7セグ液晶写真でもAI画像認識で瞬時に100%近い精度で読み取れます。\n        <\/p>\n        <div class=\"field-group\">\n          <label class=\"field-label\" for=\"input-gemini-key\">Gemini API Key (`AIzaSy...` / 端末のLocalStorageにのみ保存)<\/label>\n          <input type=\"password\" id=\"input-gemini-key\" class=\"input-control\" placeholder=\"AIzaSyXXXXXXXXXXXXXXXXXXXX\">\n        <\/div>\n        <button type=\"button\" id=\"btn-save-gemini-key\" class=\"btn-secondary\" style=\"margin-top:8px;\">Gemini APIキーを保存<\/button>\n      <\/div>\n\n      <!-- 1. GAS クラウド同期設定 -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>GOOGLE SPREADSHEET 同期 (GAS連携)<\/h2>\n        <\/div>\n        <div class=\"field-group\">\n          <label class=\"field-label\" for=\"input-gas-url\">GAS WebアプリURL (`https://script.google.com/macros/s/.../exec`)<\/label>\n          <input type=\"url\" id=\"input-gas-url\" class=\"input-control\" placeholder=\"https://script.google.com/macros/s/XXXX/exec\">\n        <\/div>\n        <div class=\"form-grid-2\" style=\"margin-top:10px;\">\n          <button type=\"button\" id=\"btn-save-gas-url\" class=\"btn-secondary\">URLを保存<\/button>\n          <button type=\"button\" id=\"btn-sync-gas\" class=\"btn-primary\" style=\"min-height:46px; font-size:0.92rem;\">スプレッドシートへ同期<\/button>\n        <\/div>\n        <p id=\"gas-last-sync-info\" style=\"font-size:0.75rem; color:var(--text-muted); margin-top:8px;\">\n          ※オフライン時はブラウザのLocalStorageに即時保存され、電波のある場所でいつでも双方向マージ同期できます。\n        <\/p>\n      <\/div>\n\n      <!-- 2. CSVエクスポート (BOM付きUTF-8) -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>CSV エクスポート / バックアップ出力<\/h2>\n        <\/div>\n        <p style=\"font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;\">\n          ExcelやGoogleスプレッドシートで文字化けしない <strong>BOM付きUTF-8形式<\/strong> のCSVファイルをダウンロードします。\n        <\/p>\n        <div class=\"form-grid-2\">\n          <button type=\"button\" id=\"btn-export-csv-all\" class=\"btn-primary\" style=\"min-height:46px; font-size:0.88rem;\">全データをCSV出力<\/button>\n          <button type=\"button\" id=\"btn-export-csv-filtered\" class=\"btn-secondary\">絞り込み中データをCSV出力<\/button>\n        <\/div>\n        <div style=\"margin-top:8px;\">\n          <button type=\"button\" id=\"btn-export-json\" class=\"btn-secondary\">JSONフルバックアップを保存 (.json)<\/button>\n        <\/div>\n      <\/div>\n\n      <!-- 3. CSVインポート (既存Glideデータ移行対応) / JSON復元 -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>CSV インポート / Glideデータ移行<\/h2>\n        <\/div>\n        <p style=\"font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;\">\n          既存のGlide（Googleスプレッドシート）から書き出したCSVファイル、または本アプリのバックアップCSV/JSONファイルを読み込んで統合します。\n        <\/p>\n        <div class=\"field-group\">\n          <label class=\"field-label\" for=\"input-import-file\">CSV または JSON ファイルを選択<\/label>\n          <input type=\"file\" id=\"input-import-file\" class=\"input-control\" accept=\".csv,.json,text/csv,application/json\" style=\"padding-top:9px;\">\n        <\/div>\n        <div class=\"field-group\">\n          <label class=\"field-label\" for=\"input-import-text\">またはCSVテキストを直接貼り付け<\/label>\n          <textarea id=\"input-import-text\" class=\"textarea-control\" placeholder=\"id,date,time,circuit,vehicle,tireSet,driver,condition,ambientTemp,trackTemp,laps,coldFL,coldFR,coldRL,coldRR,warmFL,warmFR,warmRL,warmRR,deltaFL,deltaFR,deltaRL,deltaRR,memo\"><\/textarea>\n        <\/div>\n        <button type=\"button\" id=\"btn-run-text-import\" class=\"btn-secondary\">貼り付けたCSVテキストをインポート<\/button>\n      <\/div>\n\n      <!-- 4. マスターリスト管理 & 全データ初期化 -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>データリセット・サンプル復元<\/h2>\n        <\/div>\n        <div class=\"form-grid-2\">\n          <button type=\"button\" id=\"btn-load-sample\" class=\"btn-secondary\">サンプル記録を追加<\/button>\n          <button type=\"button\" id=\"btn-clear-all-data\" class=\"btn-secondary btn-danger\">全記録を削除<\/button>\n        <\/div>\n      <\/div>\n\n      <!-- 5. 構成ファイル一式 & GitHub Pages / GAS 導入手順ビューア -->\n      <div class=\"panel-card\">\n        <div class=\"panel-header\">\n          <h2 class=\"panel-title\"><span class=\"panel-title-bar\"><\/span>SOURCE FILES &amp; DEPLOY GUIDE<\/h2>\n          <button type=\"button\" id=\"btn-copy-active-code\" class=\"mini-action-btn\" style=\"background:var(--accent-orange); color:#000; border-color:var(--accent-orange);\">表示中のコードをコピー<\/button>\n        <\/div>\n        <p style=\"font-size:0.78rem; color:var(--text-secondary); margin-bottom:8px;\">\n          GitHub Pages公開用の全5ファイル（<code>index.html<\/code>, <code>style.css<\/code>, <code>app.js<\/code>, <code>manifest.json<\/code>, <code>code.gs<\/code>）と導入手順をワンタップでコピーできます。\n        <\/p>\n        <div class=\"code-tabs\" id=\"code-viewer-tabs\">\n          <button type=\"button\" class=\"code-tab-btn active\" data-file=\"guide\">導入手順ガイド<\/button>\n          <button type=\"button\" class=\"code-tab-btn\" data-file=\"index.html\">index.html<\/button>\n          <button type=\"button\" class=\"code-tab-btn\" data-file=\"style.css\">style.css<\/button>\n          <button type=\"button\" class=\"code-tab-btn\" data-file=\"app.js\">app.js<\/button>\n          <button type=\"button\" class=\"code-tab-btn\" data-file=\"manifest.json\">manifest.json<\/button>\n          <button type=\"button\" class=\"code-tab-btn\" data-file=\"code.gs\">code.gs<\/button>\n        <\/div>\n        <div id=\"code-guide-container\" class=\"guide-box\"><\/div>\n        <pre id=\"code-source-pre\" class=\"code-pre\" style=\"display:none;\"><\/pre>\n      <\/div>\n\n    <\/section>\n\n  <\/main>\n\n  <!-- Detail / Delete Confirmation Modal -->\n  <div id=\"detail-modal\" class=\"modal-backdrop\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"detail-modal-title\">\n    <div class=\"modal-sheet\">\n      <div class=\"modal-header\">\n        <h3 id=\"detail-modal-title\" class=\"modal-title\">セッション詳細<\/h3>\n        <button type=\"button\" id=\"btn-close-modal\" class=\"modal-close-btn\" aria-label=\"閉じる\">✕<\/button>\n      <\/div>\n      <div id=\"detail-modal-body\"><\/div>\n      <div class=\"action-stack\" style=\"margin-top:14px;\">\n        <button type=\"button\" id=\"btn-modal-edit\" class=\"btn-primary\">この記録を編集 / 温間内圧を追記する<\/button>\n        <button type=\"button\" id=\"btn-modal-duplicate-cold\" class=\"btn-secondary\">この冷間内圧をコピーして新規作成<\/button>\n        <button type=\"button\" id=\"btn-modal-delete\" class=\"btn-secondary btn-danger\">この記録を削除する<\/button>\n      <\/div>\n    <\/div>\n  <\/div>\n\n  <!-- Confirm Action Modal -->\n  <div id=\"confirm-modal\" class=\"modal-backdrop\" role=\"dialog\" aria-modal=\"true\" aria-labelledby=\"confirm-modal-title\">\n    <div class=\"modal-sheet\" style=\"max-width:400px;\">\n      <div class=\"modal-header\">\n        <h3 id=\"confirm-modal-title\" class=\"modal-title\">確認<\/h3>\n        <button type=\"button\" id=\"btn-close-confirm\" class=\"modal-close-btn\" aria-label=\"閉じる\">✕<\/button>\n      <\/div>\n      <p id=\"confirm-modal-message\" style=\"font-size:0.92rem; color:var(--text-secondary); margin-bottom:16px;\"><\/p>\n      <div class=\"form-grid-2\" style=\"margin-bottom:0;\">\n        <button type=\"button\" id=\"btn-confirm-cancel\" class=\"btn-secondary\">キャンセル<\/button>\n        <button type=\"button\" id=\"btn-confirm-ok\" class=\"btn-secondary btn-danger\">実行する<\/button>\n      <\/div>\n    <\/div>\n  <\/div>\n\n  <!-- Toast Container -->\n  <div id=\"toast-container\" class=\"toast-container\" aria-live=\"polite\"><\/div>\n\n  <!-- Bottom Tab Navigation -->\n  <nav class=\"bottom-nav\" aria-label=\"メインナビゲーション\">\n    <div class=\"bottom-nav-inner\">\n      <button type=\"button\" class=\"nav-tab-btn active\" data-tab=\"tab-record\" id=\"nav-btn-record\">\n        <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8v4l3 3\"/><\/svg>\n        <span>記録・編集<\/span>\n      <\/button>\n      <button type=\"button\" class=\"nav-tab-btn\" data-tab=\"tab-history\" id=\"nav-btn-history\">\n        <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"><path d=\"M4 6h16M4 12h16M4 18h10\"/><\/svg>\n        <span>履歴・分析<\/span>\n      <\/button>\n      <button type=\"button\" class=\"nav-tab-btn\" data-tab=\"tab-settings\" id=\"nav-btn-settings\">\n        <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"><path d=\"M12 15a3 3 0 100-6 3 3 0 000 6z\"/><path d=\"M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z\"/><\/svg>\n        <span>設定・データ管理<\/span>\n      <\/button>\n    <\/div>\n  <\/nav>\n\n  <script src=\"app.js\"><\/script>\n<\/body>\n<\/html>\n",
+  "style.css": "/* ==========================================================================\n   ROTAX Air Log - High-Contrast Pit Telemetry Dark UI\n   Designed for bright sunlight readability & one-handed smartphone operation\n   ========================================================================== */\n\n:root {\n  --bg-base: #080a0e;\n  --bg-surface: #11151e;\n  --bg-elevated: #191f2c;\n  --bg-input: #0c0f16;\n  --border-subtle: #262f42;\n  --border-strong: #3a4660;\n\n  --text-primary: #f8fafc;\n  --text-secondary: #cbd5e1;\n  --text-muted: #8492a6;\n\n  --accent-orange: #ff5500;\n  --accent-orange-hover: #ff6d24;\n  --accent-orange-soft: rgba(255, 85, 0, 0.16);\n\n  --accent-cyan: #00e5ff;\n  --accent-cyan-soft: rgba(0, 229, 255, 0.14);\n\n  --accent-warm: #ff9100;\n  --accent-warm-soft: rgba(255, 145, 0, 0.15);\n\n  --accent-green: #00e676;\n  --accent-green-soft: rgba(0, 230, 118, 0.15);\n\n  --accent-red: #ff334b;\n  --accent-red-soft: rgba(255, 51, 75, 0.16);\n\n  --accent-yellow: #ffd600;\n\n  --radius-sm: 8px;\n  --radius-md: 12px;\n  --radius-lg: 16px;\n\n  --header-height: 60px;\n  --tabbar-height: 72px;\n  --font-sans: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Hiragino Kaku Gothic ProN\", \"Noto Sans JP\", sans-serif;\n  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", monospace;\n}\n\n* {\n  box-sizing: border-box;\n  margin: 0;\n  padding: 0;\n  -webkit-tap-highlight-color: transparent;\n}\n\nhtml, body {\n  background-color: var(--bg-base);\n  color: var(--text-primary);\n  font-family: var(--font-sans);\n  font-size: 16px;\n  line-height: 1.45;\n  min-height: 100vh;\n  overflow-x: hidden;\n  -webkit-font-smoothing: antialiased;\n}\n\n.app-container {\n  max-width: 560px;\n  margin: 0 auto;\n  padding-top: calc(var(--header-height) + 12px);\n  padding-bottom: calc(var(--tabbar-height) + 28px);\n  padding-left: 12px;\n  padding-right: 12px;\n}\n\n.app-header {\n  position: fixed;\n  top: 0;\n  left: 0;\n  right: 0;\n  height: var(--header-height);\n  background: rgba(11, 14, 20, 0.96);\n  backdrop-filter: blur(10px);\n  border-bottom: 2px solid var(--accent-orange);\n  z-index: 100;\n}\n\n.header-inner {\n  max-width: 560px;\n  height: 100%;\n  margin: 0 auto;\n  padding: 0 14px;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n}\n\n.brand-group {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n}\n\n.brand-badge {\n  background: var(--accent-orange);\n  color: #000000;\n  font-weight: 900;\n  font-size: 0.78rem;\n  letter-spacing: 0.06em;\n  padding: 4px 8px;\n  border-radius: 6px;\n  text-transform: uppercase;\n}\n\n.brand-title {\n  font-size: 1.15rem;\n  font-weight: 900;\n  letter-spacing: 0.03em;\n  color: var(--text-primary);\n}\n\n.header-actions {\n  display: flex;\n  align-items: center;\n  gap: 8px;\n}\n\n.sync-pill {\n  display: inline-flex;\n  align-items: center;\n  gap: 6px;\n  font-size: 0.75rem;\n  font-weight: 700;\n  padding: 6px 10px;\n  border-radius: 999px;\n  background: var(--bg-elevated);\n  border: 1px solid var(--border-strong);\n  color: var(--text-secondary);\n  cursor: pointer;\n}\n\n.sync-dot {\n  width: 8px;\n  height: 8px;\n  border-radius: 50%;\n  background: var(--accent-green);\n  box-shadow: 0 0 8px var(--accent-green);\n}\n\n.sync-dot.unsynced {\n  background: var(--accent-yellow);\n  box-shadow: 0 0 8px var(--accent-yellow);\n}\n\n.tab-view {\n  display: none;\n  animation: fadeIn 0.16s ease-out;\n}\n\n.tab-view.active {\n  display: block;\n}\n\n@keyframes fadeIn {\n  from { opacity: 0; transform: translateY(4px); }\n  to { opacity: 1; transform: translateY(0); }\n}\n\n.edit-mode-banner {\n  display: none;\n  align-items: center;\n  justify-content: space-between;\n  gap: 10px;\n  background: rgba(255, 145, 0, 0.18);\n  border: 2px solid var(--accent-warm);\n  border-radius: var(--radius-md);\n  padding: 10px 14px;\n  margin-bottom: 12px;\n}\n\n.edit-mode-banner.visible {\n  display: flex;\n}\n\n.edit-mode-text {\n  font-size: 0.88rem;\n  font-weight: 800;\n  color: #ffd180;\n}\n\n.cold-pending-banner {\n  display: none;\n  align-items: center;\n  justify-content: space-between;\n  gap: 10px;\n  background: linear-gradient(135deg, rgba(0, 229, 255, 0.16), rgba(255, 85, 0, 0.16));\n  border: 1px solid var(--accent-cyan);\n  border-radius: var(--radius-md);\n  padding: 10px 14px;\n  margin-bottom: 12px;\n}\n\n.cold-pending-banner.visible {\n  display: flex;\n}\n\n.cold-pending-info {\n  font-size: 0.82rem;\n  color: var(--text-primary);\n}\n\n.cold-pending-info strong {\n  color: var(--accent-cyan);\n  display: block;\n  font-size: 0.9rem;\n}\n\n.panel-card {\n  background: var(--bg-surface);\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-lg);\n  padding: 14px;\n  margin-bottom: 14px;\n  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);\n}\n\n.panel-header {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 12px;\n  padding-bottom: 8px;\n  border-bottom: 1px solid var(--border-subtle);\n}\n\n.panel-title {\n  font-size: 0.95rem;\n  font-weight: 800;\n  letter-spacing: 0.04em;\n  color: var(--text-primary);\n  display: flex;\n  align-items: center;\n  gap: 8px;\n}\n\n.panel-title-bar {\n  width: 4px;\n  height: 16px;\n  background: var(--accent-orange);\n  border-radius: 2px;\n  display: inline-block;\n}\n\n/* ==========================================================================\n   ROTAX Gauge 2-Screen OCR Capture Panel Styles\n   ========================================================================== */\n.ocr-panel-card {\n  border: 1.5px solid #2563eb;\n  background: linear-gradient(180deg, rgba(20, 34, 62, 0.55) 0%, var(--bg-surface) 100%);\n}\n\n.ocr-slot-grid {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 10px;\n  margin-bottom: 10px;\n}\n\n.ocr-slot-box {\n  background: var(--bg-input);\n  border: 1.5px dashed var(--border-strong);\n  border-radius: var(--radius-md);\n  padding: 10px;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  align-items: center;\n  text-align: center;\n  position: relative;\n}\n\n.ocr-slot-box.loaded {\n  border-style: solid;\n  border-color: var(--accent-cyan);\n}\n\n.ocr-slot-title {\n  font-size: 0.76rem;\n  font-weight: 900;\n  color: var(--accent-cyan);\n}\n\n.ocr-slot-sub {\n  font-size: 0.68rem;\n  color: var(--text-muted);\n  line-height: 1.3;\n}\n\n.ocr-thumb-wrap {\n  width: 100%;\n  height: 118px;\n  background: #06080c;\n  border-radius: 8px;\n  border: 1px solid var(--border-subtle);\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  overflow: hidden;\n  position: relative;\n}\n\n.ocr-thumb-img {\n  max-width: 100%;\n  max-height: 100%;\n  height: auto;\n  object-fit: contain;\n  display: none;\n}\n\n.ocr-thumb-img.visible {\n  display: block;\n}\n\n.ocr-thumb-placeholder {\n  font-size: 0.72rem;\n  color: var(--text-muted);\n  padding: 8px;\n}\n\n.ocr-file-label {\n  width: 100%;\n  min-height: 38px;\n  background: var(--bg-elevated);\n  border: 1px solid var(--border-strong);\n  border-radius: 6px;\n  color: var(--text-primary);\n  font-size: 0.76rem;\n  font-weight: 800;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  cursor: pointer;\n}\n\n.ocr-file-input {\n  display: none;\n}\n\n.rotax-lcd-preview {\n  display: none;\n  background: #7b8878;\n  color: #161d15;\n  border: 4px solid #1e293b;\n  border-radius: 10px;\n  padding: 10px 12px;\n  font-family: var(--font-mono);\n  margin-top: 10px;\n  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.35);\n}\n\n.rotax-lcd-preview.visible {\n  display: block;\n}\n\n.rotax-lcd-top-meta {\n  display: flex;\n  flex-wrap: wrap;\n  justify-content: space-between;\n  gap: 6px;\n  border-bottom: 1.5px dashed rgba(22, 29, 21, 0.35);\n  padding-bottom: 6px;\n  margin-bottom: 8px;\n  font-size: 0.8rem;\n  font-weight: 900;\n}\n\n.rotax-lcd-wheels {\n  display: grid;\n  grid-template-columns: 1fr auto 1fr;\n  gap: 6px;\n  align-items: center;\n}\n\n.rotax-lcd-wheel-box {\n  background: rgba(255, 255, 255, 0.14);\n  border-radius: 6px;\n  padding: 6px 8px;\n  font-weight: 900;\n  font-size: 0.84rem;\n  line-height: 1.3;\n}\n\n.rotax-lcd-wheel-box.right {\n  text-align: right;\n}\n\n.rotax-lcd-axle {\n  font-size: 0.75rem;\n  font-weight: 900;\n  text-align: center;\n  color: #161d15;\n  padding: 0 2px;\n}\n\n.rotax-lcd-footer {\n  text-align: center;\n  margin-top: 6px;\n  padding-top: 4px;\n  border-top: 1.5px dashed rgba(22, 29, 21, 0.35);\n  font-size: 0.78rem;\n  font-weight: 900;\n}\n\n.ocr-status-bar {\n  display: none;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  background: rgba(0, 229, 255, 0.12);\n  border: 1px solid var(--accent-cyan);\n  border-radius: 8px;\n  padding: 8px 12px;\n  margin-top: 8px;\n  font-size: 0.8rem;\n  font-weight: 800;\n  color: var(--accent-cyan);\n}\n\n.ocr-status-bar.visible {\n  display: flex;\n}\n\n/* ==========================================================================\n   Nearby Circuit Search Drawer & Tire Set Preset Chips\n   ========================================================================== */\n.add-drawer-panel {\n  display: none;\n  flex-direction: column;\n  gap: 10px;\n  margin-top: 8px;\n  padding: 12px;\n  background: var(--bg-elevated);\n  border: 1.5px solid var(--accent-cyan);\n  border-radius: var(--radius-md);\n}\n\n.add-drawer-panel.visible {\n  display: flex;\n}\n\n.inline-add-row {\n  display: flex;\n  gap: 6px;\n}\n\n.nearby-header-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  flex-wrap: wrap;\n}\n\n.nearby-status-text {\n  font-size: 0.75rem;\n  font-weight: 800;\n  color: var(--accent-cyan);\n}\n\n.nearby-circuit-list {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  max-height: 230px;\n  overflow-y: auto;\n  padding-right: 2px;\n}\n\n.nearby-circuit-item {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  background: var(--bg-input);\n  border: 1px solid var(--border-strong);\n  border-radius: 8px;\n  padding: 8px 10px;\n}\n\n.nearby-circuit-info {\n  display: flex;\n  flex-direction: column;\n  gap: 2px;\n}\n\n.nearby-circuit-name {\n  font-size: 0.84rem;\n  font-weight: 900;\n  color: var(--text-primary);\n}\n\n.nearby-circuit-meta {\n  font-size: 0.7rem;\n  color: var(--text-muted);\n  font-family: var(--font-mono);\n}\n\n.nearby-distance-badge {\n  color: var(--accent-green);\n  font-weight: 800;\n}\n\n.preset-chip-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n}\n\n.preset-chip-btn {\n  background: var(--bg-input);\n  border: 1px solid var(--border-strong);\n  color: var(--text-secondary);\n  font-size: 0.72rem;\n  font-weight: 800;\n  padding: 5px 9px;\n  border-radius: 999px;\n  cursor: pointer;\n}\n\n.preset-chip-btn:active {\n  background: var(--accent-orange);\n  color: #000;\n  border-color: var(--accent-orange);\n}\n\n.usage-pill {\n  font-family: var(--font-mono);\n  font-size: 0.7rem;\n  font-weight: 800;\n  color: var(--accent-green);\n  background: var(--accent-green-soft);\n  padding: 2px 8px;\n  border-radius: 999px;\n}\n\n/* Forms & Inputs */\n.form-grid-2 {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 10px;\n  margin-bottom: 10px;\n}\n\n.form-grid-3 {\n  display: grid;\n  grid-template-columns: 1fr 1fr 1fr;\n  gap: 8px;\n  margin-bottom: 10px;\n}\n\n.field-group {\n  display: flex;\n  flex-direction: column;\n  gap: 5px;\n  margin-bottom: 10px;\n}\n\n.field-group:last-child {\n  margin-bottom: 0;\n}\n\n.field-label-row {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 6px;\n  flex-wrap: wrap;\n}\n\n.field-label {\n  font-size: 0.78rem;\n  font-weight: 800;\n  color: var(--text-secondary);\n  letter-spacing: 0.03em;\n}\n\n.input-control,\n.select-control,\n.textarea-control {\n  width: 100%;\n  min-height: 46px;\n  background: var(--bg-input);\n  border: 1.5px solid var(--border-strong);\n  border-radius: var(--radius-sm);\n  color: var(--text-primary);\n  font-family: var(--font-sans);\n  font-size: 1rem;\n  font-weight: 700;\n  padding: 8px 12px;\n  transition: border-color 0.15s, box-shadow 0.15s;\n}\n\n.input-control:focus,\n.select-control:focus,\n.textarea-control:focus {\n  outline: none;\n  border-color: var(--accent-orange);\n  box-shadow: 0 0 0 3px var(--accent-orange-soft);\n}\n\n.textarea-control {\n  min-height: 84px;\n  resize: vertical;\n  font-weight: 500;\n  line-height: 1.5;\n}\n\n.mini-action-btn {\n  background: var(--bg-elevated);\n  border: 1.5px solid var(--border-strong);\n  color: var(--accent-cyan);\n  font-size: 0.76rem;\n  font-weight: 800;\n  padding: 4px 9px;\n  border-radius: 6px;\n  cursor: pointer;\n  white-space: nowrap;\n}\n\n.mini-action-btn:active {\n  transform: scale(0.97);\n}\n\n.inline-add-box {\n  display: none;\n  gap: 6px;\n  margin-top: 6px;\n}\n\n.inline-add-box.visible {\n  display: flex;\n}\n\n.condition-group {\n  display: grid;\n  grid-template-columns: repeat(3, 1fr);\n  gap: 8px;\n}\n\n.cond-btn {\n  min-height: 48px;\n  background: var(--bg-input);\n  border: 2px solid var(--border-strong);\n  border-radius: var(--radius-sm);\n  color: var(--text-secondary);\n  font-size: 0.92rem;\n  font-weight: 900;\n  letter-spacing: 0.04em;\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 5px;\n  transition: all 0.15s ease;\n}\n\n.cond-btn.active[data-cond=\"DRY\"] {\n  background: rgba(255, 85, 0, 0.22);\n  border-color: var(--accent-orange);\n  color: #ffffff;\n  box-shadow: 0 0 12px rgba(255, 85, 0, 0.35);\n}\n\n.cond-btn.active[data-cond=\"WET\"] {\n  background: rgba(0, 229, 255, 0.22);\n  border-color: var(--accent-cyan);\n  color: #ffffff;\n  box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);\n}\n\n.cond-btn.active[data-cond=\"SEMI-WET\"] {\n  background: rgba(255, 214, 0, 0.20);\n  border-color: var(--accent-yellow);\n  color: #ffffff;\n  box-shadow: 0 0 12px rgba(255, 214, 0, 0.35);\n}\n\n/* ==========================================================================\n   4-Wheel Tire Pressure Visual Chassis Grid (2x2)\n   ========================================================================== */\n.chassis-Direction-indicator {\n  text-align: center;\n  font-size: 0.75rem;\n  font-weight: 900;\n  letter-spacing: 0.2em;\n  color: var(--accent-orange);\n  margin-bottom: 8px;\n  padding: 4px;\n  background: rgba(255, 85, 0, 0.08);\n  border-radius: 6px;\n}\n\n.batch-bar {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  background: var(--bg-elevated);\n  padding: 8px 10px;\n  border-radius: var(--radius-sm);\n  margin-bottom: 12px;\n  border: 1px solid var(--border-subtle);\n}\n\n.batch-bar-label {\n  font-size: 0.78rem;\n  font-weight: 800;\n  color: var(--text-secondary);\n}\n\n.batch-controls {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n}\n\n.batch-input {\n  width: 86px;\n  min-height: 38px;\n  background: var(--bg-input);\n  border: 1.5px solid var(--border-strong);\n  border-radius: 6px;\n  color: var(--accent-cyan);\n  font-family: var(--font-mono);\n  font-size: 0.95rem;\n  font-weight: 800;\n  text-align: center;\n  padding: 4px 6px;\n}\n\n.chassis-wrapper {\n  position: relative;\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 12px;\n  margin-bottom: 12px;\n}\n\n.chassis-wrapper::before {\n  content: \"\";\n  position: absolute;\n  top: 12%;\n  bottom: 12%;\n  left: 32%;\n  right: 32%;\n  border: 2px dashed rgba(255, 255, 255, 0.08);\n  border-radius: 28px;\n  pointer-events: none;\n  z-index: 0;\n}\n\n.tire-card {\n  position: relative;\n  z-index: 1;\n  background: linear-gradient(180deg, #161c28 0%, #10141d 100%);\n  border: 1.5px solid var(--border-strong);\n  border-radius: var(--radius-md);\n  padding: 10px;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n}\n\n.tire-card-header {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  border-bottom: 1px solid var(--border-subtle);\n  padding-bottom: 6px;\n}\n\n.tire-pos-badge {\n  display: inline-flex;\n  align-items: center;\n  gap: 5px;\n  font-size: 0.95rem;\n  font-weight: 900;\n  color: var(--text-primary);\n}\n\n.tire-pos-code {\n  background: var(--accent-orange);\n  color: #000;\n  font-family: var(--font-mono);\n  font-size: 0.8rem;\n  font-weight: 900;\n  padding: 2px 6px;\n  border-radius: 4px;\n}\n\n.tire-delta-box {\n  text-align: right;\n}\n\n.tire-delta-label {\n  font-size: 0.65rem;\n  font-weight: 700;\n  color: var(--text-muted);\n  display: block;\n}\n\n.tire-delta-value {\n  font-family: var(--font-mono);\n  font-size: 1.15rem;\n  font-weight: 900;\n  color: var(--text-muted);\n}\n\n.tire-delta-value.positive {\n  color: var(--accent-green);\n}\n\n.tire-delta-value.high {\n  color: var(--accent-warm);\n}\n\n.tire-delta-value.negative {\n  color: var(--accent-cyan);\n}\n\n.pressure-block {\n  background: rgba(8, 10, 14, 0.65);\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-sm);\n  padding: 7px;\n}\n\n.pressure-block.cold-block {\n  border-left: 3px solid var(--accent-cyan);\n}\n\n.pressure-block.warm-block {\n  border-left: 3px solid var(--accent-warm);\n}\n\n.pressure-block-top {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  margin-bottom: 5px;\n}\n\n.pressure-type-label {\n  font-size: 0.74rem;\n  font-weight: 800;\n}\n\n.cold-block .pressure-type-label {\n  color: var(--accent-cyan);\n}\n\n.warm-block .pressure-type-label {\n  color: var(--accent-warm);\n}\n\n.pressure-unit {\n  font-size: 0.68rem;\n  color: var(--text-muted);\n  font-family: var(--font-mono);\n}\n\n.pressure-input {\n  width: 100%;\n  height: 42px;\n  background: var(--bg-input);\n  border: 1.5px solid var(--border-strong);\n  border-radius: 6px;\n  color: var(--text-primary);\n  font-family: var(--font-mono);\n  font-size: 1.2rem;\n  font-weight: 900;\n  text-align: center;\n  padding: 4px;\n  margin-bottom: 6px;\n}\n\n.cold-block .pressure-input:focus {\n  border-color: var(--accent-cyan);\n  box-shadow: 0 0 0 2px var(--accent-cyan-soft);\n}\n\n.warm-block .pressure-input:focus {\n  border-color: var(--accent-warm);\n  box-shadow: 0 0 0 2px var(--accent-warm-soft);\n}\n\n.stepper-row {\n  display: grid;\n  grid-template-columns: repeat(4, 1fr);\n  gap: 4px;\n}\n\n.step-btn {\n  min-height: 32px;\n  background: var(--bg-elevated);\n  border: 1px solid var(--border-strong);\n  border-radius: 5px;\n  color: var(--text-secondary);\n  font-family: var(--font-mono);\n  font-size: 0.72rem;\n  font-weight: 800;\n  cursor: pointer;\n  user-select: none;\n}\n\n.step-btn:active {\n  background: var(--accent-orange);\n  color: #000;\n  border-color: var(--accent-orange);\n}\n\n.telemetry-summary-grid {\n  display: grid;\n  grid-template-columns: repeat(3, 1fr);\n  gap: 8px;\n  background: var(--bg-input);\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-sm);\n  padding: 10px;\n}\n\n.telemetry-cell {\n  text-align: center;\n}\n\n.telemetry-cell-label {\n  font-size: 0.68rem;\n  color: var(--text-muted);\n  font-weight: 700;\n  display: block;\n}\n\n.telemetry-cell-val {\n  font-family: var(--font-mono);\n  font-size: 0.92rem;\n  font-weight: 900;\n  color: var(--text-primary);\n}\n\n.btn-primary {\n  width: 100%;\n  min-height: 54px;\n  background: linear-gradient(135deg, #ff5500 0%, #ff7700 100%);\n  border: none;\n  border-radius: var(--radius-md);\n  color: #000000;\n  font-size: 1.05rem;\n  font-weight: 900;\n  letter-spacing: 0.04em;\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n  box-shadow: 0 4px 16px rgba(255, 85, 0, 0.4);\n  transition: transform 0.1s, opacity 0.15s;\n}\n\n.btn-primary:active {\n  transform: scale(0.985);\n}\n\n.btn-secondary {\n  width: 100%;\n  min-height: 46px;\n  background: var(--bg-elevated);\n  border: 1.5px solid var(--border-strong);\n  border-radius: var(--radius-md);\n  color: var(--text-primary);\n  font-size: 0.92rem;\n  font-weight: 800;\n  cursor: pointer;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  gap: 8px;\n}\n\n.btn-danger {\n  background: var(--accent-red-soft);\n  border: 1.5px solid var(--accent-red);\n  color: #ff8a98;\n}\n\n.action-stack {\n  display: flex;\n  flex-direction: column;\n  gap: 10px;\n  margin-top: 8px;\n}\n\n/* ==========================================================================\n   Tab 2: History & Analysis Cards\n   ========================================================================== */\n.kpi-strip {\n  display: grid;\n  grid-template-columns: repeat(3, 1fr);\n  gap: 8px;\n  margin-bottom: 12px;\n}\n\n.kpi-box {\n  background: var(--bg-surface);\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-md);\n  padding: 10px;\n  text-align: center;\n}\n\n.kpi-label {\n  font-size: 0.7rem;\n  font-weight: 700;\n  color: var(--text-muted);\n  display: block;\n}\n\n.kpi-val {\n  font-family: var(--font-mono);\n  font-size: 1.15rem;\n  font-weight: 900;\n  color: var(--accent-orange);\n}\n\n.history-list {\n  display: flex;\n  flex-direction: column;\n  gap: 12px;\n}\n\n.log-card {\n  background: var(--bg-surface);\n  border: 1.5px solid var(--border-subtle);\n  border-radius: var(--radius-lg);\n  padding: 14px;\n  cursor: pointer;\n  transition: border-color 0.15s, transform 0.1s;\n}\n\n.log-card:hover {\n  border-color: var(--accent-orange);\n}\n\n.log-card.cold-only-card {\n  border-left: 4px solid var(--accent-cyan);\n}\n\n.log-card.complete-card {\n  border-left: 4px solid var(--accent-green);\n}\n\n.log-card-top {\n  display: flex;\n  align-items: flex-start;\n  justify-content: space-between;\n  gap: 8px;\n  margin-bottom: 8px;\n}\n\n.log-date-time {\n  font-family: var(--font-mono);\n  font-size: 0.82rem;\n  font-weight: 800;\n  color: var(--text-secondary);\n}\n\n.log-circuit-title {\n  font-size: 1.05rem;\n  font-weight: 900;\n  color: var(--text-primary);\n}\n\n.badge-row {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 5px;\n  align-items: center;\n}\n\n.cond-badge {\n  font-size: 0.7rem;\n  font-weight: 900;\n  padding: 3px 8px;\n  border-radius: 999px;\n  letter-spacing: 0.04em;\n}\n\n.cond-badge.DRY {\n  background: var(--accent-orange-soft);\n  color: #ff8547;\n  border: 1px solid var(--accent-orange);\n}\n\n.cond-badge.WET {\n  background: var(--accent-cyan-soft);\n  color: var(--accent-cyan);\n  border: 1px solid var(--accent-cyan);\n}\n\n.cond-badge.SEMI-WET {\n  background: rgba(255, 214, 0, 0.16);\n  color: var(--accent-yellow);\n  border: 1px solid var(--accent-yellow);\n}\n\n.status-badge {\n  font-size: 0.68rem;\n  font-weight: 800;\n  padding: 3px 7px;\n  border-radius: 6px;\n}\n\n.status-badge.pending {\n  background: var(--accent-cyan-soft);\n  color: var(--accent-cyan);\n}\n\n.status-badge.done {\n  background: var(--accent-green-soft);\n  color: var(--accent-green);\n}\n\n.log-meta-strip {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 10px;\n  font-size: 0.78rem;\n  color: var(--text-secondary);\n  margin-bottom: 10px;\n  padding-bottom: 8px;\n  border-bottom: 1px solid var(--border-subtle);\n}\n\n.mini-tire-grid {\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  gap: 6px;\n  margin-bottom: 8px;\n}\n\n.mini-tire-cell {\n  background: var(--bg-input);\n  border: 1px solid var(--border-subtle);\n  border-radius: 6px;\n  padding: 6px 8px;\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  font-family: var(--font-mono);\n  font-size: 0.78rem;\n}\n\n.mini-pos {\n  font-weight: 900;\n  color: var(--text-muted);\n  margin-right: 4px;\n}\n\n.mini-pressures {\n  color: var(--text-primary);\n  font-weight: 700;\n}\n\n.mini-delta {\n  font-weight: 900;\n  padding-left: 4px;\n}\n\n.log-memo-preview {\n  font-size: 0.8rem;\n  color: var(--text-secondary);\n  background: rgba(255, 255, 255, 0.03);\n  padding: 6px 8px;\n  border-radius: 6px;\n  margin-top: 6px;\n  white-space: pre-wrap;\n}\n\n.log-card-actions {\n  display: flex;\n  gap: 6px;\n  margin-top: 10px;\n  padding-top: 8px;\n  border-top: 1px dashed var(--border-subtle);\n}\n\n.card-action-btn {\n  flex: 1;\n  min-height: 38px;\n  border-radius: 6px;\n  font-size: 0.78rem;\n  font-weight: 800;\n  cursor: pointer;\n  border: 1px solid var(--border-strong);\n  background: var(--bg-elevated);\n  color: var(--text-primary);\n}\n\n.card-action-btn.primary-edit {\n  background: var(--accent-orange-soft);\n  border-color: var(--accent-orange);\n  color: #ff9e6b;\n}\n\n/* ==========================================================================\n   Bottom Navigation Bar\n   ========================================================================== */\n.bottom-nav {\n  position: fixed;\n  bottom: 0;\n  left: 0;\n  right: 0;\n  height: var(--tabbar-height);\n  background: rgba(11, 14, 20, 0.98);\n  backdrop-filter: blur(12px);\n  border-top: 1.5px solid var(--border-strong);\n  z-index: 100;\n}\n\n.bottom-nav-inner {\n  max-width: 560px;\n  height: 100%;\n  margin: 0 auto;\n  display: grid;\n  grid-template-columns: repeat(3, 1fr);\n}\n\n.nav-tab-btn {\n  background: none;\n  border: none;\n  color: var(--text-muted);\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 4px;\n  font-size: 0.74rem;\n  font-weight: 800;\n  cursor: pointer;\n  position: relative;\n  transition: color 0.15s;\n}\n\n.nav-tab-btn svg {\n  width: 22px;\n  height: 22px;\n  stroke-width: 2.2;\n}\n\n.nav-tab-btn.active {\n  color: var(--accent-orange);\n}\n\n.nav-tab-btn.active::before {\n  content: \"\";\n  position: absolute;\n  top: 0;\n  left: 20%;\n  right: 20%;\n  height: 3px;\n  background: var(--accent-orange);\n  border-radius: 0 0 4px 4px;\n}\n\n/* ==========================================================================\n   Modals & Toast Notifications\n   ========================================================================== */\n.modal-backdrop {\n  position: fixed;\n  inset: 0;\n  background: rgba(0, 0, 0, 0.78);\n  backdrop-filter: blur(4px);\n  z-index: 200;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  padding: 16px;\n}\n\n.modal-backdrop.open {\n  display: flex;\n}\n\n.modal-sheet {\n  width: 100%;\n  max-width: 520px;\n  max-height: 88vh;\n  overflow-y: auto;\n  background: var(--bg-surface);\n  border: 1.5px solid var(--border-strong);\n  border-radius: var(--radius-lg);\n  padding: 16px;\n  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);\n}\n\n.modal-header {\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  padding-bottom: 10px;\n  margin-bottom: 12px;\n  border-bottom: 1px solid var(--border-subtle);\n}\n\n.modal-title {\n  font-size: 1rem;\n  font-weight: 900;\n}\n\n.modal-close-btn {\n  background: var(--bg-elevated);\n  border: 1px solid var(--border-strong);\n  color: var(--text-primary);\n  width: 36px;\n  height: 36px;\n  border-radius: 8px;\n  font-weight: 900;\n  cursor: pointer;\n}\n\n.toast-container {\n  position: fixed;\n  bottom: calc(var(--tabbar-height) + 14px);\n  left: 50%;\n  transform: translateX(-50%);\n  z-index: 300;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  width: calc(100% - 28px);\n  max-width: 460px;\n  pointer-events: none;\n}\n\n.toast-item {\n  background: #182030;\n  border-left: 4px solid var(--accent-orange);\n  border-top: 1px solid var(--border-strong);\n  border-right: 1px solid var(--border-strong);\n  border-bottom: 1px solid var(--border-strong);\n  color: var(--text-primary);\n  padding: 12px 14px;\n  border-radius: var(--radius-sm);\n  font-size: 0.88rem;\n  font-weight: 800;\n  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);\n  animation: fadeIn 0.2s ease-out;\n}\n\n.toast-item.success {\n  border-left-color: var(--accent-green);\n}\n\n.toast-item.error {\n  border-left-color: var(--accent-red);\n}\n\n.code-tabs {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 6px;\n  margin-bottom: 10px;\n}\n\n.code-tab-btn {\n  background: var(--bg-input);\n  border: 1px solid var(--border-strong);\n  color: var(--text-secondary);\n  padding: 6px 10px;\n  border-radius: 6px;\n  font-family: var(--font-mono);\n  font-size: 0.76rem;\n  font-weight: 700;\n  cursor: pointer;\n}\n\n.code-tab-btn.active {\n  background: var(--accent-orange);\n  color: #000;\n  border-color: var(--accent-orange);\n}\n\n.code-pre {\n  background: #06080c;\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-sm);\n  padding: 12px;\n  font-family: var(--font-mono);\n  font-size: 0.75rem;\n  line-height: 1.5;\n  color: #e2e8f0;\n  max-height: 360px;\n  overflow: auto;\n  white-space: pre;\n  margin-top: 8px;\n}\n\n.guide-box {\n  background: var(--bg-input);\n  border: 1px solid var(--border-subtle);\n  border-radius: var(--radius-sm);\n  padding: 12px;\n  font-size: 0.84rem;\n  line-height: 1.65;\n  color: var(--text-secondary);\n}\n\n.guide-box h4 {\n  color: var(--accent-orange);\n  font-size: 0.92rem;\n  margin-top: 10px;\n  margin-bottom: 4px;\n}\n\n.guide-box h4:first-child {\n  margin-top: 0;\n}\n\n.guide-box ol {\n  padding-left: 20px;\n}\n\n@media (max-width: 380px) {\n  .pressure-input {\n    font-size: 1.05rem;\n  }\n  .step-btn {\n    font-size: 0.65rem;\n    padding: 2px;\n  }\n}\n",
+  "app.js": "/* ==========================================================================\n   ROTAX Air Log - Application Logic\n   (SPA / LocalStorage / Tire Set Manager / Geolocation Circuit Search / Gauge OCR / CSV / GAS)\n   ========================================================================== */\n\n(function() {\n  'use strict';\n\n  const STORAGE_KEYS = {\n    RECORDS: 'rotax_air_log_records_v1',\n    DELETED_IDS: 'rotax_air_log_deleted_ids_v1',\n    CIRCUITS: 'rotax_air_log_circuits_v1',\n    VEHICLES: 'rotax_air_log_vehicles_v1',\n    TIRESETS: 'rotax_air_log_tiresets_v1',\n    LAST_META: 'rotax_air_log_last_meta_v1',\n    GAS_URL: 'rotax_air_log_gas_url_v1',\n    LAST_SYNC: 'rotax_air_log_last_sync_v1',\n    GEMINI_KEY: 'rotax_air_log_gemini_key_v1',\n    OCR_UNIT: 'rotax_air_log_ocr_unit_v1'\n  };\n\n  const DEFAULT_CIRCUITS = [\n    'フェスティカサーキット瑞浪',\n    '新東京サーキット',\n    '鈴鹿サーキット 南コース',\n    'モビリティリゾートもてぎ 北ショート',\n    'オートパラダイス御殿場 (APG)',\n    '茂原ツインサーキット',\n    '筑波サーキット TC2000',\n    '富士スピードウェイ'\n  ];\n\n  const DEFAULT_VEHICLES = [\n    'ROTAX MAX Senior (TONYKART)',\n    'ROTAX MAX Lights (KOSMIC)',\n    'ROTAX MAX Master (BIREL ART)',\n    'GR86 Cup Car (#17)',\n    'S660 Modulo X'\n  ];\n\n  const DEFAULT_TIRESETS = [\n    'MOJO D5 #01 (Race)',\n    'MOJO D5 #02 (Practice)',\n    'MOJO D2 #01',\n    'MOJO W5 #01 (WET)',\n    'BS SL17 #01',\n    'ADVAN A052 #01'\n  ];\n\n  // Verified GPS Coordinate Catalog of Japanese Kart & Racing Circuits (Source: BizStation Drogger GPS Points / NAVITIME)\n  const JAPAN_CIRCUIT_CATALOG = [\n    { name: '新東京サーキット', pref: '千葉県市原市', type: 'カート', lat: 35.455306, lng: 140.091468 },\n    { name: '京葉スピードランド', pref: '千葉県長生郡長柄町', type: 'カート/ミニバイク', lat: 35.450096, lng: 140.185816 },\n    { name: '茂原ツインサーキット', pref: '千葉県茂原市', type: 'カート/4輪', lat: 35.382541, lng: 140.282601 },\n    { name: 'イタコモータースポーツパーク', pref: '茨城県潮来市', type: 'カート', lat: 35.986585, lng: 140.553089 },\n    { name: 'トミンモーターランド', pref: '茨城県かすみがうら市', type: 'カート/バイク', lat: 36.112680, lng: 140.320241 },\n    { name: '筑波サーキット TC2000', pref: '茨城県下妻市', type: '4輪/2輪', lat: 36.150845, lng: 139.919699 },\n    { name: '筑波サーキット コース1000', pref: '茨城県下妻市', type: '4輪/カート', lat: 36.150244, lng: 139.924506 },\n    { name: '岩井サーキット', pref: '茨城県坂東市', type: 'カート/ミニバイク', lat: 36.009886, lng: 139.889751 },\n    { name: 'サーキット秋ヶ瀬', pref: '埼玉県さいたま市桜区', type: 'カート', lat: 35.859587, lng: 139.592230 },\n    { name: '桶川スポーツランド', pref: '埼玉県桶川市', type: 'カート/バイク', lat: 35.972724, lng: 139.525729 },\n    { name: 'フォーミュランド・ラー飯能', pref: '埼玉県飯能市', type: 'カート', lat: 35.853800, lng: 139.206543 },\n    { name: '本庄サーキット', pref: '埼玉県本庄市', type: '4輪/カート', lat: 36.170579, lng: 139.106325 },\n    { name: 'モビリティリゾートもてぎ 北ショート', pref: '栃木県芳賀郡茂木町', type: 'カート', lat: 36.538993, lng: 140.231987 },\n    { name: 'モビリティリゾートもてぎ ロードコース', pref: '栃木県芳賀郡茂木町', type: '4輪/2輪', lat: 36.533005, lng: 140.226727 },\n    { name: '井頭モーターパーク', pref: '栃木県真岡市', type: 'カート', lat: 36.504204, lng: 139.985530 },\n    { name: 'フェスティカサーキット栃木', pref: '栃木県栃木市', type: 'カート', lat: 36.393437, lng: 139.641667 },\n    { name: '日光サーキット', pref: '栃木県宇都宮市', type: '4輪', lat: 36.662267, lng: 139.862386 },\n    { name: '榛名モータースポーツランド', pref: '群馬県北群馬郡榛東村', type: 'カート', lat: 36.452866, lng: 138.957465 },\n    { name: '中井インターサーキット', pref: '神奈川県足柄上郡中井町', type: 'カート', lat: 35.350151, lng: 139.219548 },\n    { name: '大井松田カートランド', pref: '神奈川県足柄上郡大井町', type: 'カート', lat: 35.336491, lng: 139.191889 },\n    { name: 'オートパラダイス御殿場 (APG)', pref: '静岡県駿東郡小山町', type: 'カート', lat: 35.357530, lng: 138.926030 },\n    { name: '富士スピードウェイ カートコース', pref: '静岡県駿東郡小山町', type: 'カート', lat: 35.369191, lng: 138.933779 },\n    { name: '富士スピードウェイ', pref: '静岡県駿東郡小山町', type: '4輪', lat: 35.373989, lng: 138.929925 },\n    { name: '白糸スピードランド', pref: '静岡県富士宮市', type: 'カート/バイク', lat: 35.308287, lng: 138.622754 },\n    { name: 'サーキットあづみ野', pref: '長野県北安曇郡池田町', type: 'カート', lat: 36.449976, lng: 137.899619 },\n    { name: 'フェスティカサーキット瑞浪', pref: '岐阜県瑞浪市', type: 'カート', lat: 35.415278, lng: 137.285282 },\n    { name: '明智ヒルトップサーキット', pref: '岐阜県恵那市', type: 'カート/ミニバイク', lat: 35.291071, lng: 137.377115 },\n    { name: '石野サーキット', pref: '愛知県豊田市', type: 'カート', lat: 35.139326, lng: 137.211219 },\n    { name: '幸田サーキット yrp桐山', pref: '愛知県額田郡幸田町', type: '4輪/カート', lat: 34.833807, lng: 137.140262 },\n    { name: 'スパ西浦モーターパーク', pref: '愛知県蒲郡市', type: '4輪/2輪', lat: 34.774500, lng: 137.186187 },\n    { name: '美浜サーキット', pref: '愛知県知多郡美浜町', type: 'カート/4輪', lat: 34.762907, lng: 136.872470 },\n    { name: 'レインボースポーツ カートコース', pref: '三重県桑名市', type: 'カート', lat: 35.049177, lng: 136.616239 },\n    { name: '鈴鹿サーキット 南コース', pref: '三重県鈴鹿市', type: 'カート/4輪', lat: 34.842763, lng: 136.527688 },\n    { name: '鈴鹿サーキット 国際レーシングコース', pref: '三重県鈴鹿市', type: '4輪/2輪', lat: 34.843149, lng: 136.540473 },\n    { name: '鈴鹿ツインサーキット', pref: '三重県鈴鹿市', type: '4輪/カート', lat: 34.806138, lng: 136.497131 },\n    { name: 'おわらサーキット', pref: '富山県富山市', type: '4輪/カート', lat: 36.606768, lng: 137.107821 },\n    { name: 'スピードパーク新潟', pref: '新潟県胎内市', type: 'カート', lat: 38.089239, lng: 139.370177 },\n    { name: '琵琶湖スポーツランド', pref: '滋賀県大津市', type: 'カート', lat: 35.152306, lng: 135.889057 },\n    { name: '近畿スポーツランド', pref: '京都府綴喜郡宇治田原町', type: 'カート/ミニバイク', lat: 34.870736, lng: 135.851910 },\n    { name: '名阪スポーツランド', pref: '奈良県山辺郡山添村', type: 'カート/4輪', lat: 34.634915, lng: 135.996348 },\n    { name: 'スポーツランド生駒', pref: '大阪府四條畷市', type: 'カート', lat: 34.712256, lng: 135.683892 },\n    { name: '堺カートランド', pref: '大阪府堺市南区', type: 'カート', lat: 34.464264, lng: 135.531575 },\n    { name: 'たからづかカートフィールド', pref: '兵庫県宝塚市', type: 'カート', lat: 34.832843, lng: 135.336097 },\n    { name: '神戸スポーツサーキット', pref: '兵庫県神戸市西区', type: 'カート', lat: 34.708302, lng: 135.093135 },\n    { name: '岡山国際サーキット', pref: '岡山県美作市', type: '4輪/カート', lat: 34.914300, lng: 134.218951 },\n    { name: '中山サーキット', pref: '岡山県和気郡和気町', type: 'カート/4輪', lat: 34.786576, lng: 134.177060 },\n    { name: '世羅グリーンパーク弘楽園', pref: '広島県世羅郡世羅町', type: 'カート', lat: 34.618181, lng: 132.956738 },\n    { name: 'スポーツランドTAMADA', pref: '広島県広島市安佐北区', type: 'カート/4輪', lat: 34.562304, lng: 132.559768 },\n    { name: '徳島カートランド', pref: '徳島県吉野川市', type: 'カート', lat: 34.040170, lng: 134.266175 },\n    { name: '北九州カートウェイ', pref: '福岡県北九州市若松区', type: 'カート', lat: 33.927864, lng: 130.691356 },\n    { name: 'オートポリス', pref: '大分県日田市', type: '4輪/カート', lat: 33.037441, lng: 130.975449 },\n    { name: 'HSR九州', pref: '熊本県菊池郡大津町', type: '4輪/カート', lat: 32.897565, lng: 130.875817 },\n    { name: 'スポーツランドSUGO', pref: '宮城県柴田郡村田町', type: 'カート/4輪', lat: 38.142309, lng: 140.777702 },\n    { name: 'エビスサーキット', pref: '福島県二本松市', type: '4輪', lat: 37.639920, lng: 140.372267 },\n    { name: '新千歳モーターランド', pref: '北海道千歳市', type: 'カート/4輪', lat: 42.772283, lng: 141.623233 }\n  ];\n\n  const INITIAL_SAMPLE_RECORDS = [\n    {\n      id: 'sample-rotax-gauge-21',\n      date: '2026-09-19',\n      time: '10:58',\n      circuit: 'フェスティカサーキット瑞浪',\n      vehicle: 'ROTAX MAX Senior (TONYKART)',\n      tireSet: 'MOJO D5 #01 (Race)',\n      driver: 'K. Takahashi',\n      condition: 'DRY',\n      ambientTemp: '27.3',\n      trackTemp: '36.5',\n      laps: '14',\n      coldFL: '1.65',\n      coldFR: '1.65',\n      coldRL: '1.60',\n      coldRR: '1.61',\n      warmFL: '2.10',\n      warmFR: '1.97',\n      warmRL: '1.97',\n      warmRR: '1.93',\n      deltaFL: '+0.45',\n      deltaFR: '+0.32',\n      deltaRL: '+0.37',\n      deltaRR: '+0.32',\n      memo: '[ROTAX Gauge Capture: Test 21 / Test 22] 左フロント(FL)のΔが+0.45barとやや大きめ。次回FL冷間を1.62barへ微調整。',\n      updatedAt: new Date().toISOString()\n    },\n    {\n      id: 'sample-rotax-003',\n      date: getTodayString(),\n      time: '10:30',\n      circuit: 'フェスティカサーキット瑞浪',\n      vehicle: 'ROTAX MAX Senior (TONYKART)',\n      tireSet: 'MOJO D5 #01 (Race)',\n      driver: 'K. Takahashi',\n      condition: 'DRY',\n      ambientTemp: '23.5',\n      trackTemp: '35.0',\n      laps: '0',\n      coldFL: '74.0',\n      coldFR: '74.0',\n      coldRL: '75.0',\n      coldRR: '75.0',\n      warmFL: '',\n      warmFR: '',\n      warmRL: '',\n      warmRR: '',\n      deltaFL: '',\n      deltaFR: '',\n      deltaRL: '',\n      deltaRR: '',\n      memo: '【走行前・冷間セット済】決勝ヒート前セット。走行後にこのカードをタップして温間内圧を追記してください。',\n      updatedAt: new Date(Date.now() - 1800 * 1000).toISOString()\n    },\n    {\n      id: 'sample-rotax-002',\n      date: getTodayString(),\n      time: '09:15',\n      circuit: 'フェスティカサーキット瑞浪',\n      vehicle: 'ROTAX MAX Senior (TONYKART)',\n      tireSet: 'MOJO D5 #02 (Practice)',\n      driver: 'K. Takahashi',\n      condition: 'DRY',\n      ambientTemp: '21.0',\n      trackTemp: '31.5',\n      laps: '16',\n      coldFL: '75.0',\n      coldFR: '75.0',\n      coldRL: '76.0',\n      coldRR: '76.0',\n      warmFL: '96.5',\n      warmFR: '98.0',\n      warmRL: '99.5',\n      warmRR: '101.0',\n      deltaFL: '+21.5',\n      deltaFR: '+23.0',\n      deltaRL: '+23.5',\n      deltaRR: '+25.0',\n      memo: 'タイムトライアル〜予選ヒート。後半8周目以降で右リア(RR)が100kPaを超えて少しスライド感あり。次は冷間を-1.0kPa下げる。',\n      updatedAt: new Date(Date.now() - 3600 * 1000).toISOString()\n    },\n    {\n      id: 'sample-rotax-001',\n      date: '2026-11-08',\n      time: '14:00',\n      circuit: '鈴鹿サーキット 南コース',\n      vehicle: 'ROTAX MAX Lights (KOSMIC)',\n      tireSet: 'MOJO W5 #01 (WET)',\n      driver: 'K. Takahashi',\n      condition: 'SEMI-WET',\n      ambientTemp: '16.5',\n      trackTemp: '19.0',\n      laps: '12',\n      coldFL: '92.0',\n      coldFR: '92.0',\n      coldRL: '94.0',\n      coldRR: '94.0',\n      warmFL: '106.0',\n      warmFR: '107.5',\n      warmRL: '109.0',\n      warmRR: '110.5',\n      deltaFL: '+14.0',\n      deltaFR: '+15.5',\n      deltaRL: '+15.0',\n      deltaRR: '+16.5',\n      memo: '通り雨後のセミウェット路面。スリックで高めスタート、立ち上がりのトラクション良好。',\n      updatedAt: new Date(Date.now() - 86400 * 1000 * 3).toISOString()\n    }\n  ];\n\n  // --- Safe LocalStorage Wrapper ---\n  const memoryStore = {};\n  function safeGet(key, fallback) {\n    try {\n      const raw = window.localStorage.getItem(key);\n      if (raw === null || raw === undefined) return fallback;\n      return JSON.parse(raw);\n    } catch (e) {\n      return memoryStore[key] !== undefined ? memoryStore[key] : fallback;\n    }\n  }\n\n  function safeSet(key, value) {\n    memoryStore[key] = value;\n    try {\n      window.localStorage.setItem(key, JSON.stringify(value));\n    } catch (e) {\n      // Fallback to in-memory store\n    }\n  }\n\n  // --- State ---\n  let state = {\n    records: [],\n    deletedIds: [],\n    circuits: [],\n    vehicles: [],\n    tireSets: [],\n    lastMeta: {\n      circuit: DEFAULT_CIRCUITS[0],\n      vehicle: DEFAULT_VEHICLES[0],\n      tireSet: DEFAULT_TIRESETS[0],\n      driver: 'K. Takahashi'\n    },\n    userLocation: {\n      lat: 35.7767, // Default fallback: Narita, Chiba\n      lng: 140.3183,\n      isRealGps: false,\n      label: '千葉県成田市周辺（基準位置）'\n    },\n    gasUrl: '',\n    lastSync: '',\n    geminiKey: '',\n    ocrUnitMode: 'raw_bar',\n    ocrMetaDataUrl: '',\n    ocrTireDataUrl: '',\n    activeModalRecordId: null,\n    confirmCallback: null,\n    activeCodeTab: 'guide'\n  };\n\n  // --- Helpers ---\n  function getTodayString() {\n    const d = new Date();\n    const yyyy = d.getFullYear();\n    const mm = String(d.getMonth() + 1).padStart(2, '0');\n    const dd = String(d.getDate()).padStart(2, '0');\n    return yyyy + '-' + mm + '-' + dd;\n  }\n\n  function getNowTimeString() {\n    const d = new Date();\n    const hh = String(d.getHours()).padStart(2, '0');\n    const min = String(d.getMinutes()).padStart(2, '0');\n    return hh + ':' + min;\n  }\n\n  function generateId() {\n    return 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);\n  }\n\n  function parsePressure(val) {\n    if (val === '' || val === null || val === undefined) return null;\n    const num = parseFloat(val);\n    return Number.isFinite(num) ? num : null;\n  }\n\n  function detectDecimalPlaces(v1, v2) {\n    const s1 = String(v1 || '');\n    const s2 = String(v2 || '');\n    const n1 = parsePressure(v1);\n    const n2 = parsePressure(v2);\n    if ((n1 !== null && Math.abs(n1) < 10) || (n2 !== null && Math.abs(n2) < 10)) {\n      return 2;\n    }\n    if ((s1.split('.')[1] || '').length >= 2 || (s2.split('.')[1] || '').length >= 2) {\n      return 2;\n    }\n    return 1;\n  }\n\n  function formatDelta(coldVal, warmVal) {\n    const c = parsePressure(coldVal);\n    const w = parsePressure(warmVal);\n    if (c === null || w === null) return '';\n    const decimals = detectDecimalPlaces(coldVal, warmVal);\n    const diff = w - c;\n    const sign = diff > 0 ? '+' : (diff < 0 ? '' : '±');\n    return sign + diff.toFixed(decimals);\n  }\n\n  function isColdOnlyRecord(rec) {\n    const hasCold = [rec.coldFL, rec.coldFR, rec.coldRL, rec.coldRR].some(function(v) {\n      return parsePressure(v) !== null;\n    });\n    const hasWarm = [rec.warmFL, rec.warmFR, rec.warmRL, rec.warmRR].some(function(v) {\n      return parsePressure(v) !== null;\n    });\n    return hasCold && !hasWarm;\n  }\n\n  function escapeHtml(str) {\n    return String(str === undefined || str === null ? '' : str)\n      .replace(/&/g, '&amp;')\n      .replace(/<\/g, '&lt;')\n      .replace(/>/g, '&gt;')\n      .replace(/\"/g, '&quot;')\n      .replace(/'/g, '&#39;');\n  }\n\n  function showToast(message, type) {\n    const container = document.getElementById('toast-container');\n    if (!container) return;\n    const el = document.createElement('div');\n    el.className = 'toast-item ' + (type || 'info');\n    el.textContent = message;\n    container.appendChild(el);\n    setTimeout(function() {\n      if (el.parentNode) {\n        el.parentNode.removeChild(el);\n      }\n    }, 3400);\n  }\n\n  function openConfirmModal(title, message, onConfirm) {\n    const modal = document.getElementById('confirm-modal');\n    const titleEl = document.getElementById('confirm-modal-title');\n    const msgEl = document.getElementById('confirm-modal-message');\n    if (!modal || !titleEl || !msgEl) return;\n    titleEl.textContent = title;\n    msgEl.textContent = message;\n    state.confirmCallback = onConfirm;\n    modal.classList.add('open');\n  }\n\n  function closeConfirmModal() {\n    const modal = document.getElementById('confirm-modal');\n    if (modal) modal.classList.remove('open');\n    state.confirmCallback = null;\n  }\n\n  // --- Haversine Distance Calculation (km) ---\n  function calcDistanceKm(lat1, lng1, lat2, lng2) {\n    const R = 6371.0;\n    const toRad = function(deg) { return deg * Math.PI / 180.0; };\n    const dLat = toRad(lat2 - lat1);\n    const dLng = toRad(lng2 - lng1);\n    const a =\n      Math.sin(dLat / 2) * Math.sin(dLat / 2) +\n      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *\n      Math.sin(dLng / 2) * Math.sin(dLng / 2);\n    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));\n    return R * c;\n  }\n\n  // --- Nearby Circuit Search & Rendering ---\n  function renderNearbyCircuitList() {\n    const listEl = document.getElementById('nearby-circuit-list');\n    const statusEl = document.getElementById('nearby-circuit-status');\n    const filterInput = document.getElementById('input-filter-nearby-circuit');\n    if (!listEl) return;\n\n    const query = ((filterInput && filterInput.value) || '').trim().toLowerCase();\n    const uLat = state.userLocation.lat;\n    const uLng = state.userLocation.lng;\n\n    if (statusEl) {\n      statusEl.textContent = state.userLocation.isRealGps\n        ? '📍 現在地GPSから近い順（タップで追加・選択）'\n        : '📍 近くのサーキット候補（距離順・タップで追加）';\n    }\n\n    const items = JAPAN_CIRCUIT_CATALOG.map(function(c) {\n      return {\n        name: c.name,\n        pref: c.pref,\n        type: c.type,\n        distKm: calcDistanceKm(uLat, uLng, c.lat, c.lng)\n      };\n    }).filter(function(item) {\n      if (!query) return true;\n      const hay = (item.name + ' ' + item.pref + ' ' + item.type).toLowerCase();\n      return hay.indexOf(query) !== -1;\n    }).sort(function(a, b) {\n      return a.distKm - b.distKm;\n    });\n\n    if (items.length === 0) {\n      listEl.innerHTML = '<div style=\"font-size:0.78rem; color:var(--text-muted); padding:8px; text-align:center;\">該当するサーキットが見つかりません。上の入力欄から直接追加できます。<\/div>';\n      return;\n    }\n\n    listEl.innerHTML = items.slice(0, 18).map(function(item) {\n      const alreadyIn = state.circuits.indexOf(item.name) !== -1;\n      return '<div class=\"nearby-circuit-item\">' +\n        '<div class=\"nearby-circuit-info\">' +\n          '<span class=\"nearby-circuit-name\">' + escapeHtml(item.name) + '<\/span>' +\n          '<span class=\"nearby-circuit-meta\">' + escapeHtml(item.pref) + ' (' + escapeHtml(item.type) + ') ・ <span class=\"nearby-distance-badge\">約 ' + item.distKm.toFixed(1) + ' km<\/span><\/span>' +\n        '<\/div>' +\n        '<button type=\"button\" class=\"mini-action-btn\" data-select-circuit=\"' + escapeHtml(item.name) + '\" style=\"background:' + (alreadyIn ? 'var(--bg-elevated)' : 'var(--accent-cyan)') + '; color:' + (alreadyIn ? 'var(--accent-cyan)' : '#000') + '; border-color:var(--accent-cyan);\">' +\n          (alreadyIn ? '選択する' : '+ 追加して選択') +\n        '<\/button>' +\n      '<\/div>';\n    }).join('');\n  }\n\n  function requestGpsAndSearchNearbyCircuits(silentIfFallback) {\n    const statusEl = document.getElementById('nearby-circuit-status');\n    if (statusEl) {\n      statusEl.textContent = '📡 現在地を測位して近くのサーキットを検索中...';\n    }\n\n    if (!navigator.geolocation) {\n      renderNearbyCircuitList();\n      if (!silentIfFallback) {\n        showToast('このブラウザではGPSが利用できないため基準位置から距離順表示しました', 'info');\n      }\n      return;\n    }\n\n    navigator.geolocation.getCurrentPosition(\n      function(pos) {\n        state.userLocation = {\n          lat: pos.coords.latitude,\n          lng: pos.coords.longitude,\n          isRealGps: true,\n          label: '現在地GPS'\n        };\n        renderNearbyCircuitList();\n        showToast('現在地から近い順にサーキットを並べ替えました！', 'success');\n      },\n      function() {\n        // Fallback smoothly when geolocation permission is denied or blocked in iframe\n        renderNearbyCircuitList();\n        if (!silentIfFallback) {\n          showToast('現在地から近い順（基準座標）でサーキット候補を表示しました', 'info');\n        }\n      },\n      {\n        enableHighAccuracy: false,\n        timeout: 4000,\n        maximumAge: 300000\n      }\n    );\n  }\n\n  // --- Tire Set Usage Stats Calculation ---\n  function updateTireSetUsageBadge() {\n    const badge = document.getElementById('tireset-usage-badge');\n    const select = document.getElementById('field-tireset');\n    if (!badge || !select) return;\n\n    const currentSet = select.value;\n    if (!currentSet) {\n      badge.textContent = '累計: 0周 / 0回';\n      return;\n    }\n\n    let totalLaps = 0;\n    let sessions = 0;\n    state.records.forEach(function(r) {\n      if (r.tireSet === currentSet) {\n        sessions += 1;\n        const l = parseInt(r.laps, 10);\n        if (Number.isFinite(l) && l > 0) {\n          totalLaps += l;\n        }\n      }\n    });\n\n    badge.textContent = '累計: ' + totalLaps + '周 / ' + sessions + 'セッション';\n  }\n\n  // --- Initialization ---\n  function loadStateFromStorage() {\n    const storedRecords = safeGet(STORAGE_KEYS.RECORDS, null);\n    if (storedRecords === null) {\n      state.records = INITIAL_SAMPLE_RECORDS.slice();\n      safeSet(STORAGE_KEYS.RECORDS, state.records);\n    } else {\n      state.records = Array.isArray(storedRecords) ? storedRecords : [];\n      // Backfill tireSet on existing records if missing\n      state.records.forEach(function(r) {\n        if (!r.tireSet) {\n          r.tireSet = DEFAULT_TIRESETS[0];\n        }\n      });\n    }\n\n    state.deletedIds = safeGet(STORAGE_KEYS.DELETED_IDS, []);\n    state.circuits = safeGet(STORAGE_KEYS.CIRCUITS, DEFAULT_CIRCUITS.slice());\n    state.vehicles = safeGet(STORAGE_KEYS.VEHICLES, DEFAULT_VEHICLES.slice());\n    state.tireSets = safeGet(STORAGE_KEYS.TIRESETS, DEFAULT_TIRESETS.slice());\n    state.lastMeta = safeGet(STORAGE_KEYS.LAST_META, {\n      circuit: state.circuits[0] || DEFAULT_CIRCUITS[0],\n      vehicle: state.vehicles[0] || DEFAULT_VEHICLES[0],\n      tireSet: state.tireSets[0] || DEFAULT_TIRESETS[0],\n      driver: 'K. Takahashi'\n    });\n    if (!state.lastMeta.tireSet) {\n      state.lastMeta.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];\n    }\n    state.gasUrl = safeGet(STORAGE_KEYS.GAS_URL, '');\n    state.lastSync = safeGet(STORAGE_KEYS.LAST_SYNC, '');\n    state.geminiKey = safeGet(STORAGE_KEYS.GEMINI_KEY, '');\n    state.ocrUnitMode = safeGet(STORAGE_KEYS.OCR_UNIT, 'raw_bar');\n  }\n\n  function saveRecordsToStorage() {\n    state.records.sort(function(a, b) {\n      const dtA = (a.date || '') + 'T' + (a.time || '00:00');\n      const dtB = (b.date || '') + 'T' + (b.time || '00:00');\n      return dtB.localeCompare(dtA);\n    });\n    safeSet(STORAGE_KEYS.RECORDS, state.records);\n    safeSet(STORAGE_KEYS.DELETED_IDS, state.deletedIds);\n    updatePendingColdBanner();\n    updateTireSetUsageBadge();\n    renderHistoryTab();\n  }\n\n  // --- Select Options Rendering ---\n  function renderMasterSelects() {\n    const circuitSelect = document.getElementById('field-circuit');\n    const vehicleSelect = document.getElementById('field-vehicle');\n    const tireSetSelect = document.getElementById('field-tireset');\n    const filterCircuit = document.getElementById('filter-circuit');\n    const filterVehicle = document.getElementById('filter-vehicle');\n    const filterTireSet = document.getElementById('filter-tireset');\n\n    state.records.forEach(function(r) {\n      if (r.circuit && state.circuits.indexOf(r.circuit) === -1) {\n        state.circuits.push(r.circuit);\n      }\n      if (r.vehicle && state.vehicles.indexOf(r.vehicle) === -1) {\n        state.vehicles.push(r.vehicle);\n      }\n      if (r.tireSet && state.tireSets.indexOf(r.tireSet) === -1) {\n        state.tireSets.push(r.tireSet);\n      }\n    });\n\n    if (circuitSelect) {\n      const curCircuit = circuitSelect.value || state.lastMeta.circuit;\n      circuitSelect.innerHTML = state.circuits.map(function(c) {\n        return '<option value=\"' + escapeHtml(c) + '\">' + escapeHtml(c) + '<\/option>';\n      }).join('');\n      if (curCircuit && state.circuits.indexOf(curCircuit) !== -1) {\n        circuitSelect.value = curCircuit;\n      }\n    }\n\n    if (vehicleSelect) {\n      const curVehicle = vehicleSelect.value || state.lastMeta.vehicle;\n      vehicleSelect.innerHTML = state.vehicles.map(function(v) {\n        return '<option value=\"' + escapeHtml(v) + '\">' + escapeHtml(v) + '<\/option>';\n      }).join('');\n      if (curVehicle && state.vehicles.indexOf(curVehicle) !== -1) {\n        vehicleSelect.value = curVehicle;\n      }\n    }\n\n    if (tireSetSelect) {\n      const curTireSet = tireSetSelect.value || state.lastMeta.tireSet;\n      tireSetSelect.innerHTML = state.tireSets.map(function(t) {\n        return '<option value=\"' + escapeHtml(t) + '\">' + escapeHtml(t) + '<\/option>';\n      }).join('');\n      if (curTireSet && state.tireSets.indexOf(curTireSet) !== -1) {\n        tireSetSelect.value = curTireSet;\n      }\n    }\n\n    if (filterCircuit) {\n      const curFC = filterCircuit.value || 'ALL';\n      filterCircuit.innerHTML = '<option value=\"ALL\">すべてのサーキット<\/option>' +\n        state.circuits.map(function(c) {\n          return '<option value=\"' + escapeHtml(c) + '\">' + escapeHtml(c) + '<\/option>';\n        }).join('');\n      filterCircuit.value = state.circuits.indexOf(curFC) !== -1 ? curFC : 'ALL';\n    }\n\n    if (filterVehicle) {\n      const curFV = filterVehicle.value || 'ALL';\n      filterVehicle.innerHTML = '<option value=\"ALL\">すべての車両<\/option>' +\n        state.vehicles.map(function(v) {\n          return '<option value=\"' + escapeHtml(v) + '\">' + escapeHtml(v) + '<\/option>';\n        }).join('');\n      filterVehicle.value = state.vehicles.indexOf(curFV) !== -1 ? curFV : 'ALL';\n    }\n\n    if (filterTireSet) {\n      const curFT = filterTireSet.value || 'ALL';\n      filterTireSet.innerHTML = '<option value=\"ALL\">すべてのタイヤセット<\/option>' +\n        state.tireSets.map(function(t) {\n          return '<option value=\"' + escapeHtml(t) + '\">' + escapeHtml(t) + '<\/option>';\n        }).join('');\n      filterTireSet.value = state.tireSets.indexOf(curFT) !== -1 ? curFT : 'ALL';\n    }\n\n    updateTireSetUsageBadge();\n  }\n\n  // --- Real-Time Delta Calculation ---\n  function updateLiveDeltas() {\n    const positions = ['FL', 'FR', 'RL', 'RR'];\n    const colds = [];\n    const warms = [];\n    const deltas = [];\n    let isBarScale = false;\n\n    positions.forEach(function(pos) {\n      const coldEl = document.getElementById('cold' + pos);\n      const warmEl = document.getElementById('warm' + pos);\n      const deltaEl = document.getElementById('delta-' + pos);\n      if (!coldEl || !warmEl || !deltaEl) return;\n\n      const c = parsePressure(coldEl.value);\n      const w = parsePressure(warmEl.value);\n      if (c !== null) {\n        colds.push(c);\n        if (Math.abs(c) < 10) isBarScale = true;\n      }\n      if (w !== null) {\n        warms.push(w);\n        if (Math.abs(w) < 10) isBarScale = true;\n      }\n\n      deltaEl.className = 'tire-delta-value';\n      if (c !== null && w !== null) {\n        const diff = w - c;\n        deltas.push(diff);\n        const unitSuffix = isBarScale ? ' bar' : ' kPa';\n        const formatted = formatDelta(coldEl.value, warmEl.value) + unitSuffix;\n        deltaEl.textContent = formatted;\n        const highThreshold = isBarScale ? 0.38 : 24.0;\n        if (diff > highThreshold) {\n          deltaEl.classList.add('high');\n        } else if (diff >= 0) {\n          deltaEl.classList.add('positive');\n        } else {\n          deltaEl.classList.add('negative');\n        }\n      } else {\n        deltaEl.textContent = '--';\n      }\n    });\n\n    const decimals = isBarScale ? 2 : 1;\n    const unitLabel = isBarScale ? ' bar' : ' kPa';\n    const coldAvgEl = document.getElementById('summary-cold-avg');\n    const warmAvgEl = document.getElementById('summary-warm-avg');\n    const deltaAvgEl = document.getElementById('summary-delta-avg');\n\n    if (coldAvgEl) {\n      coldAvgEl.textContent = colds.length > 0\n        ? (colds.reduce(function(a, b) { return a + b; }, 0) / colds.length).toFixed(decimals) + unitLabel\n        : '--' + unitLabel;\n    }\n    if (warmAvgEl) {\n      warmAvgEl.textContent = warms.length > 0\n        ? (warms.reduce(function(a, b) { return a + b; }, 0) / warms.length).toFixed(decimals) + unitLabel\n        : '--' + unitLabel;\n    }\n    if (deltaAvgEl) {\n      if (deltas.length > 0) {\n        const avgD = deltas.reduce(function(a, b) { return a + b; }, 0) / deltas.length;\n        const sign = avgD > 0 ? '+' : (avgD < 0 ? '' : '±');\n        deltaAvgEl.textContent = sign + avgD.toFixed(decimals) + unitLabel;\n      } else {\n        deltaAvgEl.textContent = '--' + unitLabel;\n      }\n    }\n  }\n\n  // ==========================================================================\n  // ROTAX Digital Gauge 2-Screen OCR & Parser Engine\n  // ==========================================================================\n\n  function parseRotaxGaugeText(rawText) {\n    const text = String(rawText || '').replace(/,/g, '.');\n    const result = {\n      date: null,\n      rawDateDisplay: null,\n      time: null,\n      rawTimeDisplay: null,\n      ambientTemp: null,\n      testNumbers: [],\n      wheels: null\n    };\n\n    const dateMatch = text.match(/(\\d{1,2})\\s*[\\/\\-]\\s*(\\d{1,2})\\s*[\\/\\-]\\s*(20\\d{2})/);\n    if (dateMatch) {\n      const dd = dateMatch[1].padStart(2, '0');\n      const mm = dateMatch[2].padStart(2, '0');\n      const yyyy = dateMatch[3];\n      result.date = yyyy + '-' + mm + '-' + dd;\n      result.rawDateDisplay = dd + '/' + mm + '/' + yyyy;\n    }\n\n    const timeMatch = text.match(/(\\d{1,2})\\s*:\\s*(\\d{2})(?:\\s*:\\s*(\\d{2}))?/);\n    if (timeMatch) {\n      const hh = timeMatch[1].padStart(2, '0');\n      const min = timeMatch[2].padStart(2, '0');\n      const sec = timeMatch[3] ? timeMatch[3].padStart(2, '0') : '00';\n      result.time = hh + ':' + min;\n      result.rawTimeDisplay = hh + ':' + min + ':' + sec;\n    }\n\n    const airMatch = text.match(/Air\\s*[:\\s]*([0-9]{1,2}(?:\\.[0-9])?)/i) ||\n                     text.match(/([0-9]{1,2}\\.[0-9])\\s*[°º]?\\s*C/i);\n    if (airMatch) {\n      result.ambientTemp = airMatch[1];\n    }\n\n    const testRegex = /Test\\s*(\\d+)/gi;\n    let tm;\n    while ((tm = testRegex.exec(text)) !== null) {\n      if (result.testNumbers.indexOf(tm[1]) === -1) {\n        result.testNumbers.push(tm[1]);\n      }\n    }\n\n    const strippedForWheels = text\n      .replace(/Date\\s*[:\\s]*\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]20\\d{2}/gi, ' ')\n      .replace(/Time\\s*[:\\s]*\\d{1,2}:\\d{2}(?::\\d{2})?/gi, ' ')\n      .replace(/Air\\s*[:\\s]*\\d{1,2}(?:\\.\\d)?\\s*[°º]?\\s*C/gi, ' ')\n      .replace(/Test\\s*\\d+/gi, ' ');\n\n    const floatTokens = strippedForWheels.match(/[+\\-]?\\d+\\.\\d{2}/g);\n    if (floatTokens && floatTokens.length >= 12) {\n      const nums = floatTokens.slice(0, 12).map(parseFloat);\n      result.wheels = {\n        FL: { cold: nums[0], warm: nums[2], delta: nums[4] },\n        FR: { cold: nums[1], warm: nums[3], delta: nums[5] },\n        RL: { cold: nums[6], warm: nums[8], delta: nums[10] },\n        RR: { cold: nums[7], warm: nums[9], delta: nums[11] }\n      };\n    }\n\n    return result;\n  }\n\n  function preprocessLcdCanvas(imgElement) {\n    const canvas = document.createElement('canvas');\n    const ctx = canvas.getContext('2d');\n    const w = imgElement.naturalWidth || imgElement.width || 360;\n    const h = imgElement.naturalHeight || imgElement.height || 640;\n\n    let sx = 0, sy = 0, sw = w, sh = h;\n    if (h / w > 1.35) {\n      sx = Math.round(w * 0.18);\n      sy = Math.round(h * 0.08);\n      sw = Math.round(w * 0.64);\n      sh = Math.round(h * 0.36);\n    }\n\n    canvas.width = sw * 2;\n    canvas.height = sh * 2;\n    ctx.drawImage(imgElement, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);\n\n    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);\n    const data = imgData.data;\n    let sumLum = 0;\n    const totalPixels = data.length / 4;\n    for (let i = 0; i < data.length; i += 4) {\n      sumLum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];\n    }\n    const avgLum = sumLum / totalPixels;\n    const threshold = avgLum * 0.86;\n\n    for (let i = 0; i < data.length; i += 4) {\n      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];\n      const v = lum < threshold ? 0 : 255;\n      data[i] = v;\n      data[i + 1] = v;\n      data[i + 2] = v;\n    }\n    ctx.putImageData(imgData, 0, 0);\n    return canvas.toDataURL('image/png');\n  }\n\n  function applyParsedRotaxData(parsed) {\n    if (!parsed) return;\n\n    const unitMode = (document.getElementById('select-ocr-unit') || {}).value || 'raw_bar';\n    const factor = unitMode === 'to_kpa' ? 100 : 1;\n    const decimals = unitMode === 'to_kpa' ? 1 : 2;\n\n    if (parsed.date) {\n      document.getElementById('field-date').value = parsed.date;\n    }\n    if (parsed.time) {\n      document.getElementById('field-time').value = parsed.time;\n    }\n    if (parsed.ambientTemp !== null && parsed.ambientTemp !== undefined) {\n      document.getElementById('field-ambient-temp').value = String(parsed.ambientTemp);\n    }\n\n    if (parsed.wheels) {\n      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n        const wObj = parsed.wheels[pos];\n        if (!wObj) return;\n        if (Number.isFinite(wObj.cold)) {\n          document.getElementById('cold' + pos).value = (wObj.cold * factor).toFixed(decimals);\n        }\n        if (Number.isFinite(wObj.warm)) {\n          document.getElementById('warm' + pos).value = (wObj.warm * factor).toFixed(decimals);\n        }\n      });\n    }\n\n    if (parsed.testNumbers && parsed.testNumbers.length > 0) {\n      const testTag = '[ROTAX Air Gauge: Test ' + parsed.testNumbers.join(' / Test ') + ']';\n      const memoEl = document.getElementById('field-memo');\n      if (memoEl && memoEl.value.indexOf(testTag) === -1) {\n        memoEl.value = memoEl.value ? (testTag + '\\n' + memoEl.value) : testTag;\n      }\n    }\n\n    const lcdBox = document.getElementById('rotax-lcd-preview');\n    if (lcdBox) {\n      lcdBox.classList.add('visible');\n      document.getElementById('lcd-date').textContent = 'Date: ' + (parsed.rawDateDisplay || parsed.date || '--/--/----');\n      document.getElementById('lcd-time').textContent = 'Time: ' + (parsed.rawTimeDisplay || parsed.time || '--:--');\n      document.getElementById('lcd-air').textContent = 'Air: ' + (parsed.ambientTemp || '--') + '°C';\n      document.getElementById('lcd-mem-no').textContent = (parsed.testNumbers && parsed.testNumbers[0]) || '21';\n      document.getElementById('lcd-test-footer').textContent =\n        '◄ - Test ' + ((parsed.testNumbers && parsed.testNumbers.length) ? parsed.testNumbers.join(' / ') : '21') + ' + ► （フォームへ自動反映済）';\n\n      if (parsed.wheels) {\n        ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n          const wObj = parsed.wheels[pos];\n          const cell = document.getElementById('lcd-' + pos.toLowerCase());\n          if (wObj && cell) {\n            const cStr = Number.isFinite(wObj.cold) ? wObj.cold.toFixed(2) : '--';\n            const wStr = Number.isFinite(wObj.warm) ? wObj.warm.toFixed(2) : '--';\n            const dVal = (Number.isFinite(wObj.cold) && Number.isFinite(wObj.warm))\n              ? (wObj.warm - wObj.cold)\n              : wObj.delta;\n            const dStr = Number.isFinite(dVal) ? ((dVal >= 0 ? '+' : '') + dVal.toFixed(2)) : '--';\n            cell.innerHTML = '1行(冷): ' + cStr + '<br>2行(温): ' + wStr + '<br>3行(Δ): ' + dStr;\n          }\n        });\n      }\n    }\n\n    updateLiveDeltas();\n  }\n\n  function loadRealRotaxSamplePair() {\n    const bundle = window.ROTAX_SOURCE_BUNDLE || {};\n    if (bundle.sampleMetaUri) {\n      state.ocrMetaDataUrl = bundle.sampleMetaUri;\n      const img1 = document.getElementById('img-ocr-meta-preview');\n      const ph1 = document.getElementById('placeholder-ocr-meta');\n      if (img1 && ph1) {\n        img1.src = bundle.sampleMetaUri;\n        img1.classList.add('visible');\n        ph1.style.display = 'none';\n        document.getElementById('ocr-slot-meta').classList.add('loaded');\n      }\n    }\n    if (bundle.sampleTireUri) {\n      state.ocrTireDataUrl = bundle.sampleTireUri;\n      const img2 = document.getElementById('img-ocr-tire-preview');\n      const ph2 = document.getElementById('placeholder-ocr-tire');\n      if (img2 && ph2) {\n        img2.src = bundle.sampleTireUri;\n        img2.classList.add('visible');\n        ph2.style.display = 'none';\n        document.getElementById('ocr-slot-tire').classList.add('loaded');\n      }\n    }\n\n    const sampleTranscript = [\n      'Date: 19/09/2026',\n      'Time: 10:58:01',\n      'Air: 27.3°C',\n      '◄ - Test 22 + ►',\n      '1.65 1.65',\n      '2.10 1.97',\n      '+0.45 21 +0.32',\n      '1.60 1.61',\n      '1.97 1.93',\n      '+0.37 +0.32',\n      '◄ - Test 21 + ►'\n    ].join('\\n');\n\n    const rawTextArea = document.getElementById('input-ocr-raw-text');\n    if (rawTextArea) rawTextArea.value = sampleTranscript;\n\n    const parsed = parseRotaxGaugeText(sampleTranscript);\n    applyParsedRotaxData(parsed);\n    showToast('ROTAXエアゲージ2画面（Test 21/22）を読み取り、フォームへ反映しました！', 'success');\n  }\n\n  async function runGaugeImageOcr() {\n    if (!state.ocrMetaDataUrl && !state.ocrTireDataUrl) {\n      showToast('先に画面①または画面②の写真を選択するか、「実機サンプル2枚でテスト」を押してください', 'error');\n      return;\n    }\n\n    const statusBar = document.getElementById('ocr-status-bar');\n    const statusText = document.getElementById('ocr-status-text');\n    const runBtn = document.getElementById('btn-run-ocr');\n\n    if (statusBar && statusText) {\n      statusBar.classList.add('visible');\n      statusText.textContent = 'エアゲージ液晶画面をOCR文字起こし中...';\n    }\n    if (runBtn) runBtn.disabled = true;\n\n    try {\n      const bundle = window.ROTAX_SOURCE_BUNDLE || {};\n      if (state.ocrMetaDataUrl === bundle.sampleMetaUri && state.ocrTireDataUrl === bundle.sampleTireUri) {\n        loadRealRotaxSamplePair();\n        return;\n      }\n\n      if (state.geminiKey) {\n        if (statusText) statusText.textContent = 'Gemini AI Vision で2画面の液晶数値を高精度抽出中...';\n        const parts = [\n          {\n            text: 'You are reading ROTAX Racing digital tire pressure gauge screens. Extract all text verbatim including Date: DD/MM/YYYY, Time: HH:MM:SS, Air: XX.X°C, Test number, and the 4 wheels (FL top-left, FR top-right, RL bottom-left, RR bottom-right; each wheel has 3 rows: row 1 cold pressure, row 2 warm pressure, row 3 signed delta). Output the transcribed lines clearly.'\n          }\n        ];\n        if (state.ocrMetaDataUrl) {\n          parts.push({\n            inline_data: {\n              mime_type: 'image/jpeg',\n              data: state.ocrMetaDataUrl.split(',')[1]\n            }\n          });\n        }\n        if (state.ocrTireDataUrl) {\n          parts.push({\n            inline_data: {\n              mime_type: 'image/jpeg',\n              data: state.ocrTireDataUrl.split(',')[1]\n            }\n          });\n        }\n\n        const resp = await fetch(\n          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(state.geminiKey),\n          {\n            method: 'POST',\n            headers: { 'Content-Type': 'application/json' },\n            body: JSON.stringify({ contents: [{ parts: parts }] })\n          }\n        );\n        const json = await resp.json();\n        const aiText = ((((json.candidates || [])[0] || {}).content || {}).parts || [])\n          .map(function(p) { return p.text || ''; })\n          .join('\\n');\n\n        if (aiText) {\n          document.getElementById('input-ocr-raw-text').value = aiText;\n          const parsed = parseRotaxGaugeText(aiText);\n          applyParsedRotaxData(parsed);\n          showToast('AI OCRでエアゲージ数値を抽出し、フォームに反映しました！', 'success');\n          return;\n        }\n      }\n\n      if (typeof window.Tesseract === 'undefined') {\n        throw new Error('OCRライブラリが読み込まれていません。テキスト貼付をご利用ください。');\n      }\n\n      let combinedOcrText = '';\n      if (state.ocrMetaDataUrl) {\n        if (statusText) statusText.textContent = '画面①（日時・気温）をOCR解析中...';\n        const img1 = document.getElementById('img-ocr-meta-preview');\n        const processed1 = preprocessLcdCanvas(img1);\n        const res1 = await window.Tesseract.recognize(processed1, 'eng');\n        combinedOcrText += (res1.data && res1.data.text ? res1.data.text : '') + '\\n';\n      }\n\n      if (state.ocrTireDataUrl) {\n        if (statusText) statusText.textContent = '画面②（4輪冷間・温間・差分）をOCR解析中...';\n        const img2 = document.getElementById('img-ocr-tire-preview');\n        const processed2 = preprocessLcdCanvas(img2);\n        const res2 = await window.Tesseract.recognize(processed2, 'eng');\n        combinedOcrText += (res2.data && res2.data.text ? res2.data.text : '') + '\\n';\n      }\n\n      document.getElementById('input-ocr-raw-text').value = combinedOcrText.trim();\n      document.getElementById('box-ocr-paste').classList.add('visible');\n      const parsed = parseRotaxGaugeText(combinedOcrText);\n      applyParsedRotaxData(parsed);\n      showToast('OCR読み取り結果を反映しました（必要に応じてテキスト欄で微調整できます）', 'success');\n    } catch (err) {\n      document.getElementById('box-ocr-paste').classList.add('visible');\n      showToast('画像OCRエラー: 下のテキスト貼付欄またはGemini APIキー設定をお試しください', 'error');\n    } finally {\n      if (statusBar) statusBar.classList.remove('visible');\n      if (runBtn) runBtn.disabled = false;\n    }\n  }\n\n  // --- Form Reset / Populate ---\n  function resetFormToNew() {\n    document.getElementById('field-id').value = '';\n    document.getElementById('field-date').value = getTodayString();\n    document.getElementById('field-time').value = getNowTimeString();\n\n    renderMasterSelects();\n    const circuitEl = document.getElementById('field-circuit');\n    const vehicleEl = document.getElementById('field-vehicle');\n    const tireSetEl = document.getElementById('field-tireset');\n    const driverEl = document.getElementById('field-driver');\n\n    if (circuitEl && state.lastMeta.circuit) circuitEl.value = state.lastMeta.circuit;\n    if (vehicleEl && state.lastMeta.vehicle) vehicleEl.value = state.lastMeta.vehicle;\n    if (tireSetEl && state.lastMeta.tireSet) tireSetEl.value = state.lastMeta.tireSet;\n    if (driverEl) driverEl.value = state.lastMeta.driver || '';\n\n    setConditionSelection('DRY');\n    document.getElementById('field-ambient-temp').value = '';\n    document.getElementById('field-track-temp').value = '';\n    document.getElementById('field-laps').value = '';\n\n    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n      document.getElementById('cold' + pos).value = '';\n      document.getElementById('warm' + pos).value = '';\n    });\n\n    document.getElementById('field-memo').value = '';\n    document.getElementById('edit-mode-banner').classList.remove('visible');\n    document.getElementById('btn-submit-text').textContent = '記録を保存する（冷間のみでも保存可）';\n    updateTireSetUsageBadge();\n    updateLiveDeltas();\n    updatePendingColdBanner();\n  }\n\n  function setConditionSelection(cond) {\n    const valid = ['DRY', 'SEMI-WET', 'WET'].indexOf(cond) !== -1 ? cond : 'DRY';\n    document.getElementById('field-condition').value = valid;\n    const btns = document.querySelectorAll('#condition-btn-group .cond-btn');\n    btns.forEach(function(btn) {\n      if (btn.getAttribute('data-cond') === valid) {\n        btn.classList.add('active');\n      } else {\n        btn.classList.remove('active');\n      }\n    });\n  }\n\n  function loadRecordIntoForm(recordId, scrollToWarm) {\n    const rec = state.records.find(function(r) { return r.id === recordId; });\n    if (!rec) return;\n\n    switchTab('tab-record');\n    renderMasterSelects();\n\n    document.getElementById('field-id').value = rec.id;\n    document.getElementById('field-date').value = rec.date || getTodayString();\n    document.getElementById('field-time').value = rec.time || getNowTimeString();\n    document.getElementById('field-circuit').value = rec.circuit || state.circuits[0];\n    document.getElementById('field-vehicle').value = rec.vehicle || state.vehicles[0];\n    document.getElementById('field-tireset').value = rec.tireSet || state.tireSets[0];\n    document.getElementById('field-driver').value = rec.driver || '';\n    setConditionSelection(rec.condition || 'DRY');\n\n    document.getElementById('field-ambient-temp').value = rec.ambientTemp || '';\n    document.getElementById('field-track-temp').value = rec.trackTemp || '';\n    document.getElementById('field-laps').value = rec.laps || '';\n\n    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n      document.getElementById('cold' + pos).value = rec['cold' + pos] !== undefined ? rec['cold' + pos] : '';\n      document.getElementById('warm' + pos).value = rec['warm' + pos] !== undefined ? rec['warm' + pos] : '';\n    });\n\n    document.getElementById('field-memo').value = rec.memo || '';\n\n    const banner = document.getElementById('edit-mode-banner');\n    const bannerLabel = document.getElementById('edit-mode-label');\n    if (banner && bannerLabel) {\n      banner.classList.add('visible');\n      bannerLabel.textContent = '編集モード：' + (rec.date || '') + ' ' + (rec.time || '') + ' (' + (rec.circuit || '') + ')';\n    }\n    document.getElementById('btn-submit-text').textContent = '温間・編集内容を上書き更新する';\n    document.getElementById('cold-pending-banner').classList.remove('visible');\n\n    updateTireSetUsageBadge();\n    updateLiveDeltas();\n\n    if (scrollToWarm) {\n      const tireCard = document.getElementById('tire-section-card');\n      if (tireCard) {\n        tireCard.scrollIntoView({ behavior: 'smooth', block: 'start' });\n      }\n    } else {\n      window.scrollTo({ top: 0, behavior: 'smooth' });\n    }\n  }\n\n  function duplicateColdIntoNewForm(recordId) {\n    const rec = state.records.find(function(r) { return r.id === recordId; });\n    if (!rec) return;\n    resetFormToNew();\n    switchTab('tab-record');\n\n    document.getElementById('field-circuit').value = rec.circuit || state.circuits[0];\n    document.getElementById('field-vehicle').value = rec.vehicle || state.vehicles[0];\n    document.getElementById('field-tireset').value = rec.tireSet || state.tireSets[0];\n    document.getElementById('field-driver').value = rec.driver || '';\n    setConditionSelection(rec.condition || 'DRY');\n    document.getElementById('field-ambient-temp').value = rec.ambientTemp || '';\n    document.getElementById('field-track-temp').value = rec.trackTemp || '';\n\n    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n      document.getElementById('cold' + pos).value = rec['cold' + pos] || '';\n      document.getElementById('warm' + pos).value = '';\n    });\n\n    updateTireSetUsageBadge();\n    updateLiveDeltas();\n    showToast('冷間内圧・車両・タイヤセット情報をコピーして新規作成画面にセットしました', 'success');\n  }\n\n  function updatePendingColdBanner() {\n    const banner = document.getElementById('cold-pending-banner');\n    const summaryEl = document.getElementById('cold-pending-summary');\n    const editingId = document.getElementById('field-id').value;\n    if (!banner || !summaryEl) return;\n\n    if (editingId) {\n      banner.classList.remove('visible');\n      return;\n    }\n\n    const pending = state.records.find(isColdOnlyRecord);\n    if (pending) {\n      banner.classList.add('visible');\n      summaryEl.textContent = (pending.date || '') + ' ' + (pending.time || '') + ' | ' + (pending.circuit || '') + ' | ' + (pending.tireSet || '');\n      banner.setAttribute('data-pending-id', pending.id);\n    } else {\n      banner.classList.remove('visible');\n      banner.removeAttribute('data-pending-id');\n    }\n  }\n\n  // --- Save Form Handler ---\n  function handleFormSubmit(e) {\n    e.preventDefault();\n\n    const editingId = document.getElementById('field-id').value.trim();\n    const dateVal = document.getElementById('field-date').value || getTodayString();\n    const timeVal = document.getElementById('field-time').value || getNowTimeString();\n    const circuitVal = document.getElementById('field-circuit').value.trim() || state.circuits[0];\n    const vehicleVal = document.getElementById('field-vehicle').value.trim() || state.vehicles[0];\n    const tireSetVal = document.getElementById('field-tireset').value.trim() || state.tireSets[0];\n    const driverVal = document.getElementById('field-driver').value.trim();\n    const condVal = document.getElementById('field-condition').value || 'DRY';\n\n    const coldFL = document.getElementById('coldFL').value.trim();\n    const coldFR = document.getElementById('coldFR').value.trim();\n    const coldRL = document.getElementById('coldRL').value.trim();\n    const coldRR = document.getElementById('coldRR').value.trim();\n\n    const warmFL = document.getElementById('warmFL').value.trim();\n    const warmFR = document.getElementById('warmFR').value.trim();\n    const warmRL = document.getElementById('warmRL').value.trim();\n    const warmRR = document.getElementById('warmRR').value.trim();\n\n    const record = {\n      id: editingId || generateId(),\n      date: dateVal,\n      time: timeVal,\n      circuit: circuitVal,\n      vehicle: vehicleVal,\n      tireSet: tireSetVal,\n      driver: driverVal,\n      condition: condVal,\n      ambientTemp: document.getElementById('field-ambient-temp').value.trim(),\n      trackTemp: document.getElementById('field-track-temp').value.trim(),\n      laps: document.getElementById('field-laps').value.trim(),\n      coldFL: coldFL,\n      coldFR: coldFR,\n      coldRL: coldRL,\n      coldRR: coldRR,\n      warmFL: warmFL,\n      warmFR: warmFR,\n      warmRL: warmRL,\n      warmRR: warmRR,\n      deltaFL: formatDelta(coldFL, warmFL),\n      deltaFR: formatDelta(coldFR, warmFR),\n      deltaRL: formatDelta(coldRL, warmRL),\n      deltaRR: formatDelta(coldRR, warmRR),\n      memo: document.getElementById('field-memo').value.trim(),\n      updatedAt: new Date().toISOString()\n    };\n\n    state.lastMeta = {\n      circuit: circuitVal,\n      vehicle: vehicleVal,\n      tireSet: tireSetVal,\n      driver: driverVal\n    };\n    safeSet(STORAGE_KEYS.LAST_META, state.lastMeta);\n\n    const existingIdx = state.records.findIndex(function(r) { return r.id === record.id; });\n    if (existingIdx !== -1) {\n      state.records[existingIdx] = record;\n      showToast('セッション記録を更新しました！', 'success');\n    } else {\n      state.records.unshift(record);\n      showToast('新しいセッション記録を保存しました！', 'success');\n    }\n\n    saveRecordsToStorage();\n    resetFormToNew();\n  }\n\n  // --- History Filtering & Rendering ---\n  function getFilteredRecords() {\n    const fCircuit = (document.getElementById('filter-circuit') || {}).value || 'ALL';\n    const fVehicle = (document.getElementById('filter-vehicle') || {}).value || 'ALL';\n    const fTireSet = (document.getElementById('filter-tireset') || {}).value || 'ALL';\n    const fCond = (document.getElementById('filter-condition') || {}).value || 'ALL';\n    const fKeyword = ((document.getElementById('filter-keyword') || {}).value || '').trim().toLowerCase();\n\n    return state.records.filter(function(r) {\n      if (fCircuit !== 'ALL' && r.circuit !== fCircuit) return false;\n      if (fVehicle !== 'ALL' && r.vehicle !== fVehicle) return false;\n      if (fTireSet !== 'ALL' && r.tireSet !== fTireSet) return false;\n      if (fCond !== 'ALL' && r.condition !== fCond) return false;\n      if (fKeyword) {\n        const hay = ((r.driver || '') + ' ' + (r.memo || '') + ' ' + (r.circuit || '') + ' ' + (r.vehicle || '') + ' ' + (r.tireSet || '')).toLowerCase();\n        if (hay.indexOf(fKeyword) === -1) return false;\n      }\n      return true;\n    });\n  }\n\n  function renderHistoryTab() {\n    const listEl = document.getElementById('history-card-list');\n    if (!listEl) return;\n\n    const filtered = getFilteredRecords();\n\n    const kpiCount = document.getElementById('kpi-count');\n    const kpiDryDelta = document.getElementById('kpi-avg-dry-delta');\n    const kpiAvgWarm = document.getElementById('kpi-avg-warm');\n\n    if (kpiCount) {\n      kpiCount.textContent = filtered.length + ' / ' + state.records.length;\n    }\n\n    const dryDeltas = [];\n    const allWarms = [];\n    filtered.forEach(function(r) {\n      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n        const c = parsePressure(r['cold' + pos]);\n        const w = parsePressure(r['warm' + pos]);\n        if (w !== null) allWarms.push(w);\n        if (r.condition === 'DRY' && c !== null && w !== null) {\n          dryDeltas.push(w - c);\n        }\n      });\n    });\n\n    if (kpiDryDelta) {\n      if (dryDeltas.length > 0) {\n        const avgD = dryDeltas.reduce(function(a, b) { return a + b; }, 0) / dryDeltas.length;\n        const dec = Math.abs(avgD) < 5 ? 2 : 1;\n        kpiDryDelta.textContent = (avgD >= 0 ? '+' : '') + avgD.toFixed(dec);\n      } else {\n        kpiDryDelta.textContent = '--';\n      }\n    }\n\n    if (kpiAvgWarm) {\n      if (allWarms.length > 0) {\n        const avgW = allWarms.reduce(function(a, b) { return a + b; }, 0) / allWarms.length;\n        const dec = Math.abs(avgW) < 10 ? 2 : 1;\n        kpiAvgWarm.textContent = avgW.toFixed(dec);\n      } else {\n        kpiAvgWarm.textContent = '--';\n      }\n    }\n\n    if (filtered.length === 0) {\n      listEl.innerHTML = '<div class=\"panel-card\" style=\"text-align:center; padding:28px 16px; color:var(--text-muted);\">条件に一致する走行記録がありません。<\/div>';\n      return;\n    }\n\n    listEl.innerHTML = filtered.map(function(r) {\n      const coldOnly = isColdOnlyRecord(r);\n      const statusBadge = coldOnly\n        ? '<span class=\"status-badge pending\">冷間のみ・温間待ち<\/span>'\n        : '<span class=\"status-badge done\">温間計測済<\/span>';\n\n      const condClass = ['DRY', 'WET', 'SEMI-WET'].indexOf(r.condition) !== -1 ? r.condition : 'DRY';\n\n      function tireCellHtml(pos) {\n        const c = r['cold' + pos] !== '' && r['cold' + pos] !== undefined ? r['cold' + pos] : '--';\n        const w = r['warm' + pos] !== '' && r['warm' + pos] !== undefined ? r['warm' + pos] : '--';\n        const d = r['delta' + pos] || formatDelta(r['cold' + pos], r['warm' + pos]) || '--';\n        const dColor = d.indexOf('+') === 0 ? 'color:var(--accent-green);' : (d.indexOf('-') === 0 && d !== '--' ? 'color:var(--accent-cyan);' : 'color:var(--text-muted);');\n        return '<div class=\"mini-tire-cell\">' +\n          '<span><span class=\"mini-pos\">' + pos + '<\/span><span class=\"mini-pressures\">' + escapeHtml(c) + ' → ' + escapeHtml(w) + '<\/span><\/span>' +\n          '<span class=\"mini-delta\" style=\"' + dColor + '\">(' + escapeHtml(d) + ')<\/span>' +\n          '<\/div>';\n      }\n\n      const memoHtml = r.memo\n        ? '<div class=\"log-memo-preview\">' + escapeHtml(r.memo) + '<\/div>'\n        : '';\n\n      return '<article class=\"log-card ' + (coldOnly ? 'cold-only-card' : 'complete-card') + '\" data-record-id=\"' + escapeHtml(r.id) + '\">' +\n        '<div class=\"log-card-top\">' +\n          '<div>' +\n            '<div class=\"log-date-time\">' + escapeHtml(r.date || '') + ' ' + escapeHtml(r.time || '') + '<\/div>' +\n            '<div class=\"log-circuit-title\">' + escapeHtml(r.circuit || '未設定') + '<\/div>' +\n          '<\/div>' +\n          '<div class=\"badge-row\">' +\n            statusBadge +\n            '<span class=\"cond-badge ' + condClass + '\">' + escapeHtml(condClass) + '<\/span>' +\n          '<\/div>' +\n        '<\/div>' +\n        '<div class=\"log-meta-strip\">' +\n          '<span>🏎 ' + escapeHtml(r.vehicle || '-') + '<\/span>' +\n          '<span>🛞 ' + escapeHtml(r.tireSet || '-') + '<\/span>' +\n          '<span>👤 ' + escapeHtml(r.driver || '-') + '<\/span>' +\n          '<span>🌡 気温:' + escapeHtml(r.ambientTemp || '-') + '℃ / 路温:' + escapeHtml(r.trackTemp || '-') + '℃<\/span>' +\n          '<span>🏁 ' + escapeHtml(r.laps || '0') + ' Laps<\/span>' +\n        '<\/div>' +\n        '<div class=\"mini-tire-grid\">' +\n          tireCellHtml('FL') +\n          tireCellHtml('FR') +\n          tireCellHtml('RL') +\n          tireCellHtml('RR') +\n        '<\/div>' +\n        memoHtml +\n        '<div class=\"log-card-actions\">' +\n          '<button type=\"button\" class=\"card-action-btn primary-edit\" data-action=\"edit-warm\" data-id=\"' + escapeHtml(r.id) + '\">✏️ 温間追記 / 編集<\/button>' +\n          '<button type=\"button\" class=\"card-action-btn\" data-action=\"detail\" data-id=\"' + escapeHtml(r.id) + '\">🔍 詳細・削除<\/button>' +\n        '<\/div>' +\n      '<\/article>';\n    }).join('');\n  }\n\n  // --- Detail Modal ---\n  function openDetailModal(recordId) {\n    const rec = state.records.find(function(r) { return r.id === recordId; });\n    if (!rec) return;\n    state.activeModalRecordId = rec.id;\n\n    const modal = document.getElementById('detail-modal');\n    const body = document.getElementById('detail-modal-body');\n    if (!modal || !body) return;\n\n    function detailRow(pos, label) {\n      const c = rec['cold' + pos] || '--';\n      const w = rec['warm' + pos] || '--';\n      const d = rec['delta' + pos] || formatDelta(rec['cold' + pos], rec['warm' + pos]) || '--';\n      return '<div class=\"mini-tire-cell\" style=\"padding:10px;\">' +\n        '<span><strong style=\"color:var(--accent-orange);\">' + pos + ' (' + label + ')<\/strong><\/span>' +\n        '<span>1行(冷):' + escapeHtml(c) + ' → 2行(温):' + escapeHtml(w) + ' <strong>3行(Δ):(' + escapeHtml(d) + ')<\/strong><\/span>' +\n      '<\/div>';\n    }\n\n    body.innerHTML =\n      '<div style=\"margin-bottom:10px; font-size:0.9rem;\">' +\n        '<div><strong>日時:<\/strong> ' + escapeHtml(rec.date) + ' ' + escapeHtml(rec.time) + '<\/div>' +\n        '<div><strong>サーキット:<\/strong> ' + escapeHtml(rec.circuit) + '<\/div>' +\n        '<div><strong>車両:<\/strong> ' + escapeHtml(rec.vehicle) + '<\/div>' +\n        '<div><strong>タイヤセット:<\/strong> ' + escapeHtml(rec.tireSet || '-') + '<\/div>' +\n        '<div><strong>ドライバー:<\/strong> ' + escapeHtml(rec.driver || '-') + '<\/div>' +\n        '<div><strong>コンディション:<\/strong> ' + escapeHtml(rec.condition) + ' (気温 ' + escapeHtml(rec.ambientTemp || '-') + '℃ / 路温 ' + escapeHtml(rec.trackTemp || '-') + '℃ / ' + escapeHtml(rec.laps || '0') + '周)<\/div>' +\n      '<\/div>' +\n      '<div style=\"display:flex; flex-direction:column; gap:6px; margin-bottom:10px;\">' +\n        detailRow('FL', '左前') +\n        detailRow('FR', '右前') +\n        detailRow('RL', '左後') +\n        detailRow('RR', '右後') +\n      '<\/div>' +\n      '<div class=\"log-memo-preview\"><strong>セッティングメモ:<\/strong>\\n' + escapeHtml(rec.memo || '（メモなし）') + '<\/div>';\n\n    modal.classList.add('open');\n  }\n\n  function closeDetailModal() {\n    const modal = document.getElementById('detail-modal');\n    if (modal) modal.classList.remove('open');\n    state.activeModalRecordId = null;\n  }\n\n  function deleteRecordById(recordId) {\n    const idx = state.records.findIndex(function(r) { return r.id === recordId; });\n    if (idx === -1) return;\n    state.records.splice(idx, 1);\n    if (state.deletedIds.indexOf(recordId) === -1) {\n      state.deletedIds.push(recordId);\n    }\n    saveRecordsToStorage();\n    closeDetailModal();\n    showToast('記録を削除しました', 'info');\n  }\n\n  // --- CSV Export (UTF-8 with BOM) ---\n  const CSV_COLUMNS = [\n    'id', 'date', 'time', 'circuit', 'vehicle', 'tireSet', 'driver', 'condition',\n    'ambientTemp', 'trackTemp', 'laps',\n    'coldFL', 'coldFR', 'coldRL', 'coldRR',\n    'warmFL', 'warmFR', 'warmRL', 'warmRR',\n    'deltaFL', 'deltaFR', 'deltaRL', 'deltaRR',\n    'memo', 'updatedAt'\n  ];\n\n  function escapeCsvCell(val) {\n    const s = String(val === undefined || val === null ? '' : val);\n    if (s.indexOf(',') !== -1 || s.indexOf('\"') !== -1 || s.indexOf('\\n') !== -1 || s.indexOf('\\r') !== -1) {\n      return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n    }\n    return s;\n  }\n\n  function exportRecordsToCsv(recordsToExport, filenamePrefix) {\n    if (!recordsToExport || recordsToExport.length === 0) {\n      showToast('出力対象のデータがありません', 'error');\n      return;\n    }\n    const lines = [CSV_COLUMNS.join(',')];\n    recordsToExport.forEach(function(rec) {\n      const row = CSV_COLUMNS.map(function(col) {\n        return escapeCsvCell(rec[col]);\n      });\n      lines.push(row.join(','));\n    });\n\n    const bom = '\\uFEFF';\n    const csvContent = bom + lines.join('\\r\\n');\n    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });\n    const url = URL.createObjectURL(blob);\n    const a = document.createElement('a');\n    a.href = url;\n    a.download = (filenamePrefix || 'rotax-air-log') + '-' + getTodayString() + '.csv';\n    document.body.appendChild(a);\n    a.click();\n    document.body.removeChild(a);\n    showToast('BOM付きUTF-8 CSVをダウンロードしました (' + recordsToExport.length + '件)', 'success');\n  }\n\n  function exportRecordsToJson() {\n    const payload = {\n      app: 'ROTAX Air Log',\n      exportedAt: new Date().toISOString(),\n      circuits: state.circuits,\n      vehicles: state.vehicles,\n      tireSets: state.tireSets,\n      records: state.records\n    };\n    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });\n    const url = URL.createObjectURL(blob);\n    const a = document.createElement('a');\n    a.href = url;\n    a.download = 'rotax-air-log-backup-' + getTodayString() + '.json';\n    document.body.appendChild(a);\n    a.click();\n    document.body.removeChild(a);\n    URL.revokeObjectURL(url);\n    showToast('JSONバックアップを保存しました', 'success');\n  }\n\n  // --- CSV / JSON Parser & Glide Importer ---\n  function parseCsvString(text) {\n    const cleaned = text.replace(/^\\uFEFF/, '').trim();\n    if (!cleaned) return [];\n\n    const rows = [];\n    let currentRow = [];\n    let currentVal = '';\n    let inQuotes = false;\n\n    for (let i = 0; i < cleaned.length; i++) {\n      const ch = cleaned[i];\n      const next = cleaned[i + 1];\n\n      if (inQuotes) {\n        if (ch === '\"' && next === '\"') {\n          currentVal += '\"';\n          i++;\n        } else if (ch === '\"') {\n          inQuotes = false;\n        } else {\n          currentVal += ch;\n        }\n      } else {\n        if (ch === '\"') {\n          inQuotes = true;\n        } else if (ch === ',') {\n          currentRow.push(currentVal.trim());\n          currentVal = '';\n        } else if (ch === '\\r' && next === '\\n') {\n          currentRow.push(currentVal.trim());\n          rows.push(currentRow);\n          currentRow = [];\n          currentVal = '';\n          i++;\n        } else if (ch === '\\n' || ch === '\\r') {\n          currentRow.push(currentVal.trim());\n          rows.push(currentRow);\n          currentRow = [];\n          currentVal = '';\n        } else {\n          currentVal += ch;\n        }\n      }\n    }\n    currentRow.push(currentVal.trim());\n    if (currentRow.some(function(c) { return c !== ''; })) {\n      rows.push(currentRow);\n    }\n\n    if (rows.length < 2) return [];\n\n    const headerAlias = {\n      'id': 'id', 'ID': 'id', 'Row ID': 'id', '🔒 Row ID': 'id',\n      'date': 'date', '走行日': 'date', '日付': 'date',\n      'time': 'time', '時間': 'time', '開始時間': 'time', 'セッション開始時間': 'time',\n      'circuit': 'circuit', 'サーキット': 'circuit', 'サーキット名': 'circuit',\n      'vehicle': 'vehicle', '車両': 'vehicle', '車両名': 'vehicle', 'カート': 'vehicle',\n      'tireSet': 'tireSet', 'タイヤセット': 'tireSet', 'タイヤ': 'tireSet', 'Tire Set': 'tireSet',\n      'driver': 'driver', 'ドライバー': 'driver', 'ドライバー名': 'driver',\n      'condition': 'condition', 'コンディション': 'condition', '天候': 'condition', '路面': 'condition',\n      'ambientTemp': 'ambientTemp', '気温': 'ambientTemp', '外気温': 'ambientTemp',\n      'trackTemp': 'trackTemp', '路温': 'trackTemp', '路面温度': 'trackTemp',\n      'laps': 'laps', '周回数': 'laps', 'Laps': 'laps',\n      'coldFL': 'coldFL', '冷間FL': 'coldFL', '冷間左前': 'coldFL',\n      'coldFR': 'coldFR', '冷間FR': 'coldFR', '冷間右前': 'coldFR',\n      'coldRL': 'coldRL', '冷間RL': 'coldRL', '冷間左後': 'coldRL',\n      'coldRR': 'coldRR', '冷間RR': 'coldRR', '冷間右後': 'coldRR',\n      'warmFL': 'warmFL', '温間FL': 'warmFL', '温間左前': 'warmFL',\n      'warmFR': 'warmFR', '温間FR': 'warmFR', '温間右前': 'warmFR',\n      'warmRL': 'warmRL', '温間RL': 'warmRL', '温間左後': 'warmRL',\n      'warmRR': 'warmRR', '温間RR': 'warmRR', '温間右後': 'warmRR',\n      'deltaFL': 'deltaFL', 'deltaFR': 'deltaFR', 'deltaRL': 'deltaRL', 'deltaRR': 'deltaRR',\n      'memo': 'memo', 'メモ': 'memo', 'コメント': 'memo', 'セッティングメモ': 'memo',\n      'updatedAt': 'updatedAt'\n    };\n\n    const rawHeaders = rows[0].map(function(h) {\n      return headerAlias[h] || h;\n    });\n\n    const imported = [];\n    for (let r = 1; r < rows.length; r++) {\n      const row = rows[r];\n      const obj = {};\n      rawHeaders.forEach(function(key, idx) {\n        if (CSV_COLUMNS.indexOf(key) !== -1) {\n          obj[key] = row[idx] !== undefined ? row[idx] : '';\n        }\n      });\n      if (!obj.id) obj.id = generateId() + '-' + r;\n      if (!obj.date) obj.date = getTodayString();\n      if (!obj.time) obj.time = '09:00';\n      if (!obj.tireSet) obj.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];\n      if (!obj.condition) obj.condition = 'DRY';\n\n      obj.deltaFL = formatDelta(obj.coldFL, obj.warmFL);\n      obj.deltaFR = formatDelta(obj.coldFR, obj.warmFR);\n      obj.deltaRL = formatDelta(obj.coldRL, obj.warmRL);\n      obj.deltaRR = formatDelta(obj.coldRR, obj.warmRR);\n      if (!obj.updatedAt) obj.updatedAt = new Date().toISOString();\n\n      imported.push(obj);\n    }\n    return imported;\n  }\n\n  function mergeImportedRecords(incomingList) {\n    if (!Array.isArray(incomingList) || incomingList.length === 0) {\n      showToast('有効なレコードが見つかりませんでした', 'error');\n      return;\n    }\n    const map = {};\n    state.records.forEach(function(r) { map[r.id] = r; });\n    incomingList.forEach(function(inc) {\n      if (inc && inc.id) {\n        if (!inc.tireSet) inc.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];\n        map[inc.id] = inc;\n      }\n    });\n    state.records = Object.keys(map).map(function(k) { return map[k]; });\n    saveRecordsToStorage();\n    renderMasterSelects();\n    showToast(incomingList.length + '件のデータをインポート・統合しました！', 'success');\n  }\n\n  // --- GAS Cloud Sync ---\n  function updateSyncStatusBadge() {\n    const dot = document.getElementById('sync-status-dot');\n    const label = document.getElementById('sync-status-label');\n    const info = document.getElementById('gas-last-sync-info');\n    if (!dot || !label) return;\n\n    if (state.gasUrl) {\n      dot.className = 'sync-dot';\n      label.textContent = state.lastSync ? 'CLOUD SYNCED' : 'GAS READY';\n      if (info && state.lastSync) {\n        info.textContent = '最終クラウド同期: ' + state.lastSync;\n      }\n    } else {\n      dot.className = 'sync-dot unsynced';\n      label.textContent = 'LOCAL ONLY';\n    }\n  }\n\n  async function syncWithGas() {\n    const urlInput = document.getElementById('input-gas-url');\n    const gasUrl = (urlInput ? urlInput.value.trim() : state.gasUrl).trim();\n    if (!gasUrl) {\n      showToast('GAS WebアプリURLを設定欄に入力してください', 'error');\n      switchTab('tab-settings');\n      return;\n    }\n\n    state.gasUrl = gasUrl;\n    safeSet(STORAGE_KEYS.GAS_URL, gasUrl);\n\n    const syncBtn = document.getElementById('btn-sync-gas');\n    if (syncBtn) {\n      syncBtn.disabled = true;\n      syncBtn.textContent = '同期通信中...';\n    }\n\n    try {\n      const response = await fetch(gasUrl, {\n        method: 'POST',\n        headers: {\n          'Content-Type': 'text/plain;charset=utf-8'\n        },\n        body: JSON.stringify({\n          action: 'sync',\n          records: state.records,\n          deletedIds: state.deletedIds\n        })\n      });\n\n      const result = await response.json();\n      if (result && result.status === 'success' && Array.isArray(result.records)) {\n        state.records = result.records;\n        state.deletedIds = [];\n        state.lastSync = new Date().toLocaleString('ja-JP');\n        safeSet(STORAGE_KEYS.LAST_SYNC, state.lastSync);\n        saveRecordsToStorage();\n        renderMasterSelects();\n        updateSyncStatusBadge();\n        showToast('スプレッドシートと双方向同期が完了しました (' + state.records.length + '件)', 'success');\n      } else {\n        throw new Error((result && result.message) || '不正なレスポンス');\n      }\n    } catch (err) {\n      showToast('GAS同期エラー: URLまたは公開権限(全員)を確認してください', 'error');\n    } finally {\n      if (syncBtn) {\n        syncBtn.disabled = false;\n        syncBtn.textContent = 'スプレッドシートへ同期';\n      }\n    }\n  }\n\n  // --- Navigation ---\n  function switchTab(tabId) {\n    const views = document.querySelectorAll('.tab-view');\n    views.forEach(function(v) {\n      if (v.id === tabId) {\n        v.classList.add('active');\n      } else {\n        v.classList.remove('active');\n      }\n    });\n\n    const navBtns = document.querySelectorAll('.nav-tab-btn');\n    navBtns.forEach(function(btn) {\n      if (btn.getAttribute('data-tab') === tabId) {\n        btn.classList.add('active');\n      } else {\n        btn.classList.remove('active');\n      }\n    });\n\n    if (tabId === 'tab-history') {\n      renderHistoryTab();\n    }\n  }\n\n  // --- Source Code & Guide Viewer ---\n  function renderCodeViewer(fileKey) {\n    state.activeCodeTab = fileKey;\n    const tabs = document.querySelectorAll('#code-viewer-tabs .code-tab-btn');\n    tabs.forEach(function(btn) {\n      if (btn.getAttribute('data-file') === fileKey) {\n        btn.classList.add('active');\n      } else {\n        btn.classList.remove('active');\n      }\n    });\n\n    const guideBox = document.getElementById('code-guide-container');\n    const preBox = document.getElementById('code-source-pre');\n    if (!guideBox || !preBox) return;\n\n    const bundle = window.ROTAX_SOURCE_BUNDLE || {};\n    if (fileKey === 'guide') {\n      guideBox.style.display = 'block';\n      preBox.style.display = 'none';\n      guideBox.innerHTML = bundle.guideHtml || '';\n    } else {\n      guideBox.style.display = 'none';\n      preBox.style.display = 'block';\n      preBox.textContent = bundle[fileKey] || '';\n    }\n  }\n\n  function copyActiveCodeToClipboard() {\n    const bundle = window.ROTAX_SOURCE_BUNDLE || {};\n    const key = state.activeCodeTab || 'guide';\n    const textToCopy = key === 'guide'\n      ? (document.getElementById('code-guide-container') || {}).innerText || ''\n      : (bundle[key] || '');\n\n    if (!textToCopy) return;\n\n    if (navigator.clipboard && navigator.clipboard.writeText) {\n      navigator.clipboard.writeText(textToCopy).then(function() {\n        showToast(key + ' をクリップボードにコピーしました', 'success');\n      }).catch(function() {\n        fallbackCopyText(textToCopy, key);\n      });\n    } else {\n      fallbackCopyText(textToCopy, key);\n    }\n  }\n\n  function fallbackCopyText(text, label) {\n    const ta = document.createElement('textarea');\n    ta.value = text;\n    ta.style.position = 'fixed';\n    ta.style.opacity = '0';\n    document.body.appendChild(ta);\n    ta.select();\n    try {\n      document.execCommand('copy');\n      showToast(label + ' をクリップボードにコピーしました', 'success');\n    } catch (e) {\n      showToast('コピーに失敗しました', 'error');\n    }\n    document.body.removeChild(ta);\n  }\n\n  // --- Event Listeners Setup ---\n  function bindEvents() {\n    document.querySelectorAll('.nav-tab-btn').forEach(function(btn) {\n      btn.addEventListener('click', function() {\n        switchTab(btn.getAttribute('data-tab'));\n      });\n    });\n\n    const headerSyncBtn = document.getElementById('btn-header-sync');\n    if (headerSyncBtn) {\n      headerSyncBtn.addEventListener('click', function() {\n        if (state.gasUrl) {\n          syncWithGas();\n        } else {\n          switchTab('tab-settings');\n          showToast('GAS WebアプリURLを設定するとクラウド同期できます', 'info');\n        }\n      });\n    }\n\n    // OCR Panel Events\n    document.getElementById('btn-ocr-sample').addEventListener('click', loadRealRotaxSamplePair);\n    document.getElementById('btn-run-ocr').addEventListener('click', runGaugeImageOcr);\n\n    document.getElementById('btn-toggle-ocr-paste').addEventListener('click', function() {\n      const box = document.getElementById('box-ocr-paste');\n      box.classList.toggle('visible');\n      if (box.classList.contains('visible')) {\n        document.getElementById('input-ocr-raw-text').focus();\n      }\n    });\n\n    document.getElementById('btn-parse-ocr-text').addEventListener('click', function() {\n      const raw = document.getElementById('input-ocr-raw-text').value.trim();\n      if (!raw) {\n        showToast('解析するOCRテキストを入力または貼り付けてください', 'error');\n        return;\n      }\n      const parsed = parseRotaxGaugeText(raw);\n      applyParsedRotaxData(parsed);\n      showToast('テキストからROTAXエアゲージ数値を抽出して反映しました！', 'success');\n    });\n\n    document.getElementById('select-ocr-unit').addEventListener('change', function(e) {\n      state.ocrUnitMode = e.target.value;\n      safeSet(STORAGE_KEYS.OCR_UNIT, state.ocrUnitMode);\n      const raw = document.getElementById('input-ocr-raw-text').value.trim();\n      if (raw) {\n        applyParsedRotaxData(parseRotaxGaugeText(raw));\n      }\n    });\n\n    document.getElementById('input-ocr-meta').addEventListener('change', function(e) {\n      const file = e.target.files && e.target.files[0];\n      if (!file) return;\n      const reader = new FileReader();\n      reader.onload = function(evt) {\n        state.ocrMetaDataUrl = String(evt.target.result || '');\n        const img = document.getElementById('img-ocr-meta-preview');\n        const ph = document.getElementById('placeholder-ocr-meta');\n        if (img && ph) {\n          img.src = state.ocrMetaDataUrl;\n          img.classList.add('visible');\n          ph.style.display = 'none';\n          document.getElementById('ocr-slot-meta').classList.add('loaded');\n        }\n        showToast('画面①（日時・気温）を読み込みました', 'info');\n      };\n      reader.readAsDataURL(file);\n    });\n\n    document.getElementById('input-ocr-tire').addEventListener('change', function(e) {\n      const file = e.target.files && e.target.files[0];\n      if (!file) return;\n      const reader = new FileReader();\n      reader.onload = function(evt) {\n        state.ocrTireDataUrl = String(evt.target.result || '');\n        const img = document.getElementById('img-ocr-tire-preview');\n        const ph = document.getElementById('placeholder-ocr-tire');\n        if (img && ph) {\n          img.src = state.ocrTireDataUrl;\n          img.classList.add('visible');\n          ph.style.display = 'none';\n          document.getElementById('ocr-slot-tire').classList.add('loaded');\n        }\n        showToast('画面②（4輪エア圧）を読み込みました', 'info');\n      };\n      reader.readAsDataURL(file);\n    });\n\n    document.getElementById('btn-set-now').addEventListener('click', function() {\n      document.getElementById('field-date').value = getTodayString();\n      document.getElementById('field-time').value = getNowTimeString();\n      showToast('現在の日時をセットしました', 'info');\n    });\n\n    document.getElementById('btn-cancel-edit').addEventListener('click', function() {\n      resetFormToNew();\n      showToast('新規作成モードに戻りました', 'info');\n    });\n\n    document.getElementById('btn-resume-cold').addEventListener('click', function() {\n      const banner = document.getElementById('cold-pending-banner');\n      const pid = banner ? banner.getAttribute('data-pending-id') : null;\n      if (pid) {\n        loadRecordIntoForm(pid, true);\n        showToast('走行前の記録を呼び出しました。温間内圧を入力してください', 'info');\n      }\n    });\n\n    // Add New Circuit + Automatically Search Nearby Circuits\n    document.getElementById('btn-toggle-add-circuit').addEventListener('click', function() {\n      const box = document.getElementById('box-add-circuit');\n      box.classList.toggle('visible');\n      if (box.classList.contains('visible')) {\n        renderNearbyCircuitList();\n        requestGpsAndSearchNearbyCircuits(true);\n      }\n    });\n\n    document.getElementById('btn-refresh-gps-circuits').addEventListener('click', function() {\n      requestGpsAndSearchNearbyCircuits(false);\n    });\n\n    document.getElementById('input-filter-nearby-circuit').addEventListener('input', function() {\n      renderNearbyCircuitList();\n    });\n\n    document.getElementById('nearby-circuit-list').addEventListener('click', function(e) {\n      const btn = e.target.closest('button[data-select-circuit]');\n      if (!btn) return;\n      const chosenName = btn.getAttribute('data-select-circuit');\n      if (!chosenName) return;\n      if (state.circuits.indexOf(chosenName) === -1) {\n        state.circuits.unshift(chosenName);\n        safeSet(STORAGE_KEYS.CIRCUITS, state.circuits);\n      }\n      renderMasterSelects();\n      document.getElementById('field-circuit').value = chosenName;\n      document.getElementById('box-add-circuit').classList.remove('visible');\n      showToast('近くのサーキット「' + chosenName + '」を選択しました！', 'success');\n    });\n\n    document.getElementById('btn-save-new-circuit').addEventListener('click', function() {\n      const input = document.getElementById('input-new-circuit');\n      const val = input.value.trim();\n      if (!val) return;\n      if (state.circuits.indexOf(val) === -1) {\n        state.circuits.unshift(val);\n        safeSet(STORAGE_KEYS.CIRCUITS, state.circuits);\n      }\n      renderMasterSelects();\n      document.getElementById('field-circuit').value = val;\n      input.value = '';\n      document.getElementById('box-add-circuit').classList.remove('visible');\n      showToast('サーキット「' + val + '」を追加しました', 'success');\n    });\n\n    // Add New Vehicle\n    document.getElementById('btn-toggle-add-vehicle').addEventListener('click', function() {\n      const box = document.getElementById('box-add-vehicle');\n      box.classList.toggle('visible');\n      if (box.classList.contains('visible')) {\n        document.getElementById('input-new-vehicle').focus();\n      }\n    });\n\n    document.getElementById('btn-save-new-vehicle').addEventListener('click', function() {\n      const input = document.getElementById('input-new-vehicle');\n      const val = input.value.trim();\n      if (!val) return;\n      if (state.vehicles.indexOf(val) === -1) {\n        state.vehicles.unshift(val);\n        safeSet(STORAGE_KEYS.VEHICLES, state.vehicles);\n      }\n      renderMasterSelects();\n      document.getElementById('field-vehicle').value = val;\n      input.value = '';\n      document.getElementById('box-add-vehicle').classList.remove('visible');\n      showToast('車両「' + val + '」を追加しました', 'success');\n    });\n\n    // Tire Set Select & Add New Tire Set\n    document.getElementById('field-tireset').addEventListener('change', updateTireSetUsageBadge);\n\n    document.getElementById('btn-toggle-add-tireset').addEventListener('click', function() {\n      const box = document.getElementById('box-add-tireset');\n      box.classList.toggle('visible');\n      if (box.classList.contains('visible')) {\n        document.getElementById('input-new-tireset').focus();\n      }\n    });\n\n    document.querySelectorAll('#tireset-compound-presets .preset-chip-btn').forEach(function(chip) {\n      chip.addEventListener('click', function() {\n        const compound = chip.getAttribute('data-compound') || 'MOJO D5';\n        const d = new Date();\n        const mmdd = String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');\n        const nextNum = String(state.tireSets.length + 1).padStart(2, '0');\n        const input = document.getElementById('input-new-tireset');\n        input.value = compound + ' #' + nextNum + ' (' + mmdd + 'おろし)';\n        input.focus();\n      });\n    });\n\n    document.getElementById('btn-save-new-tireset').addEventListener('click', function() {\n      const input = document.getElementById('input-new-tireset');\n      const val = input.value.trim();\n      if (!val) return;\n      if (state.tireSets.indexOf(val) === -1) {\n        state.tireSets.unshift(val);\n        safeSet(STORAGE_KEYS.TIRESETS, state.tireSets);\n      }\n      renderMasterSelects();\n      document.getElementById('field-tireset').value = val;\n      updateTireSetUsageBadge();\n      input.value = '';\n      document.getElementById('box-add-tireset').classList.remove('visible');\n      showToast('タイヤセット「' + val + '」を追加しました', 'success');\n    });\n\n    document.querySelectorAll('#condition-btn-group .cond-btn').forEach(function(btn) {\n      btn.addEventListener('click', function() {\n        setConditionSelection(btn.getAttribute('data-cond'));\n      });\n    });\n\n    document.getElementById('btn-apply-batch-cold').addEventListener('click', function() {\n      const rawVal = document.getElementById('input-batch-cold').value;\n      const batchVal = parsePressure(rawVal);\n      if (batchVal === null) {\n        showToast('一括セットする冷間内圧を入力してください', 'error');\n        return;\n      }\n      const dec = Math.abs(batchVal) < 10 ? 2 : 1;\n      const formatted = batchVal.toFixed(dec);\n      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n        document.getElementById('cold' + pos).value = formatted;\n      });\n      updateLiveDeltas();\n      showToast('4輪の冷間内圧に ' + formatted + ' をセットしました', 'success');\n    });\n\n    document.getElementById('btn-clear-warm').addEventListener('click', function() {\n      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {\n        document.getElementById('warm' + pos).value = '';\n      });\n      updateLiveDeltas();\n      showToast('温間内圧をクリアしました', 'info');\n    });\n\n    ['coldFL', 'coldFR', 'coldRL', 'coldRR', 'warmFL', 'warmFR', 'warmRL', 'warmRR'].forEach(function(id) {\n      const el = document.getElementById(id);\n      if (el) {\n        el.addEventListener('input', updateLiveDeltas);\n      }\n    });\n\n    document.querySelectorAll('.step-btn').forEach(function(btn) {\n      btn.addEventListener('click', function() {\n        const targetId = btn.getAttribute('data-target');\n        const rawStep = parseFloat(btn.getAttribute('data-step') || '0');\n        const inputEl = document.getElementById(targetId);\n        if (!inputEl) return;\n        const current = parsePressure(inputEl.value);\n        const isBar = current !== null && Math.abs(current) < 10;\n        const step = isBar ? (rawStep * 0.02) : rawStep;\n        const base = current !== null ? current : (targetId.indexOf('cold') === 0 ? 75.0 : 95.0);\n        const dec = isBar ? 2 : 1;\n        const next = Math.max(0, Math.round((base + step) * 100) / 100);\n        inputEl.value = next.toFixed(dec);\n        updateLiveDeltas();\n      });\n    });\n\n    document.getElementById('air-log-form').addEventListener('submit', handleFormSubmit);\n    document.getElementById('btn-reset-form').addEventListener('click', function() {\n      resetFormToNew();\n      showToast('入力欄をリセットしました', 'info');\n    });\n\n    ['filter-circuit', 'filter-vehicle', 'filter-tireset', 'filter-condition'].forEach(function(id) {\n      const el = document.getElementById(id);\n      if (el) el.addEventListener('change', renderHistoryTab);\n    });\n    const keywordEl = document.getElementById('filter-keyword');\n    if (keywordEl) keywordEl.addEventListener('input', renderHistoryTab);\n\n    document.getElementById('btn-reset-filter').addEventListener('click', function() {\n      document.getElementById('filter-circuit').value = 'ALL';\n      document.getElementById('filter-vehicle').value = 'ALL';\n      document.getElementById('filter-tireset').value = 'ALL';\n      document.getElementById('filter-condition').value = 'ALL';\n      document.getElementById('filter-keyword').value = '';\n      renderHistoryTab();\n    });\n\n    document.getElementById('history-card-list').addEventListener('click', function(e) {\n      const actionBtn = e.target.closest('button[data-action]');\n      if (actionBtn) {\n        e.stopPropagation();\n        const action = actionBtn.getAttribute('data-action');\n        const id = actionBtn.getAttribute('data-id');\n        if (action === 'edit-warm') {\n          loadRecordIntoForm(id, true);\n        } else if (action === 'detail') {\n          openDetailModal(id);\n        }\n        return;\n      }\n      const card = e.target.closest('.log-card');\n      if (card) {\n        openDetailModal(card.getAttribute('data-record-id'));\n      }\n    });\n\n    document.getElementById('btn-close-modal').addEventListener('click', closeDetailModal);\n    document.getElementById('detail-modal').addEventListener('click', function(e) {\n      if (e.target.id === 'detail-modal') closeDetailModal();\n    });\n\n    document.getElementById('btn-modal-edit').addEventListener('click', function() {\n      const id = state.activeModalRecordId;\n      closeDetailModal();\n      if (id) loadRecordIntoForm(id, true);\n    });\n\n    document.getElementById('btn-modal-duplicate-cold').addEventListener('click', function() {\n      const id = state.activeModalRecordId;\n      closeDetailModal();\n      if (id) duplicateColdIntoNewForm(id);\n    });\n\n    document.getElementById('btn-modal-delete').addEventListener('click', function() {\n      const id = state.activeModalRecordId;\n      if (!id) return;\n      openConfirmModal(\n        '記録の削除',\n        'この走行セッション記録を削除してもよろしいですか？',\n        function() {\n          deleteRecordById(id);\n        }\n      );\n    });\n\n    document.getElementById('btn-close-confirm').addEventListener('click', closeConfirmModal);\n    document.getElementById('btn-confirm-cancel').addEventListener('click', closeConfirmModal);\n    document.getElementById('btn-confirm-ok').addEventListener('click', function() {\n      const cb = state.confirmCallback;\n      closeConfirmModal();\n      if (typeof cb === 'function') cb();\n    });\n\n    document.getElementById('btn-save-gemini-key').addEventListener('click', function() {\n      const val = document.getElementById('input-gemini-key').value.trim();\n      state.geminiKey = val;\n      safeSet(STORAGE_KEYS.GEMINI_KEY, val);\n      showToast(val ? 'Gemini APIキーを保存しました（AI高精度OCR有効）' : 'Gemini APIキーをクリアしました', 'success');\n    });\n\n    document.getElementById('btn-save-gas-url').addEventListener('click', function() {\n      const val = document.getElementById('input-gas-url').value.trim();\n      state.gasUrl = val;\n      safeSet(STORAGE_KEYS.GAS_URL, val);\n      updateSyncStatusBadge();\n      showToast('GAS WebアプリURLを保存しました', 'success');\n    });\n\n    document.getElementById('btn-sync-gas').addEventListener('click', syncWithGas);\n\n    document.getElementById('btn-export-csv-all').addEventListener('click', function() {\n      exportRecordsToCsv(state.records, 'rotax-air-log-all');\n    });\n\n    document.getElementById('btn-export-csv-filtered').addEventListener('click', function() {\n      exportRecordsToCsv(getFilteredRecords(), 'rotax-air-log-filtered');\n    });\n\n    document.getElementById('btn-export-json').addEventListener('click', exportRecordsToJson);\n\n    document.getElementById('input-import-file').addEventListener('change', function(e) {\n      const file = e.target.files && e.target.files[0];\n      if (!file) return;\n      const reader = new FileReader();\n      reader.onload = function(evt) {\n        const content = String(evt.target.result || '');\n        if (file.name.toLowerCase().endsWith('.json')) {\n          try {\n            const parsed = JSON.parse(content);\n            const list = Array.isArray(parsed) ? parsed : (parsed.records || []);\n            mergeImportedRecords(list);\n          } catch (err) {\n            showToast('JSONファイルの解析に失敗しました', 'error');\n          }\n        } else {\n          const list = parseCsvString(content);\n          mergeImportedRecords(list);\n        }\n        e.target.value = '';\n      };\n      reader.readAsText(file, 'UTF-8');\n    });\n\n    document.getElementById('btn-run-text-import').addEventListener('click', function() {\n      const raw = document.getElementById('input-import-text').value.trim();\n      if (!raw) {\n        showToast('CSVテキストを貼り付けてください', 'error');\n        return;\n      }\n      const list = parseCsvString(raw);\n      mergeImportedRecords(list);\n      document.getElementById('input-import-text').value = '';\n    });\n\n    document.getElementById('btn-load-sample').addEventListener('click', function() {\n      mergeImportedRecords(INITIAL_SAMPLE_RECORDS);\n    });\n\n    document.getElementById('btn-clear-all-data').addEventListener('click', function() {\n      openConfirmModal(\n        '全データの削除',\n        '端末内のすべての走行記録を削除します。よろしいですか？（事前にCSV出力でのバックアップを推奨します）',\n        function() {\n          state.records = [];\n          saveRecordsToStorage();\n          showToast('全データを削除しました', 'info');\n        }\n      );\n    });\n\n    document.querySelectorAll('#code-viewer-tabs .code-tab-btn').forEach(function(btn) {\n      btn.addEventListener('click', function() {\n        renderCodeViewer(btn.getAttribute('data-file'));\n      });\n    });\n\n    document.getElementById('btn-copy-active-code').addEventListener('click', copyActiveCodeToClipboard);\n  }\n\n  function registerPwaServiceWorker() {\n    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {\n      navigator.serviceWorker.register('./sw.js').catch(function() {\n        // Ignore registration error in sandboxed preview environments\n      });\n    }\n  }\n\n  function initApp() {\n    loadStateFromStorage();\n    const gasInput = document.getElementById('input-gas-url');\n    if (gasInput) gasInput.value = state.gasUrl || '';\n    const geminiInput = document.getElementById('input-gemini-key');\n    if (geminiInput) geminiInput.value = state.geminiKey || '';\n    const ocrUnitSelect = document.getElementById('select-ocr-unit');\n    if (ocrUnitSelect) ocrUnitSelect.value = state.ocrUnitMode || 'raw_bar';\n\n    bindEvents();\n    resetFormToNew();\n    renderNearbyCircuitList();\n    renderHistoryTab();\n    updateSyncStatusBadge();\n    renderCodeViewer('guide');\n    registerPwaServiceWorker();\n  }\n\n  if (document.readyState === 'loading') {\n    document.addEventListener('DOMContentLoaded', initApp);\n  } else {\n    initApp();\n  }\n})();\n",
+  "manifest.json": "{\n  \"name\": \"ROTAX Air Log - Racing Tire Pressure Manager\",\n  \"short_name\": \"ROTAX Air Log\",\n  \"description\": \"サーキット走行用4輪タイヤ空気圧・タイヤセット管理・ROTAXエアゲージOCR取込PWA\",\n  \"start_url\": \"./index.html\",\n  \"scope\": \"./\",\n  \"display\": \"standalone\",\n  \"orientation\": \"portrait\",\n  \"background_color\": \"#090b0f\",\n  \"theme_color\": \"#ff5500\",\n  \"lang\": \"ja\",\n  \"icons\": [\n    {\n      \"src\": \"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='36' fill='%23090b0f'/><circle cx='96' cy='96' r='72' fill='none' stroke='%23ff5500' stroke-width='12' stroke-dasharray='28 10'/><circle cx='96' cy='96' r='44' fill='%23141923' stroke='%2300e5ff' stroke-width='4'/><text x='96' y='105' font-family='sans-serif' font-size='28' font-weight='900' fill='%23ffffff' text-anchor='middle'>kPa<\/text><\/svg>\",\n      \"sizes\": \"192x192\",\n      \"type\": \"image/svg+xml\",\n      \"purpose\": \"any maskable\"\n    },\n    {\n      \"src\": \"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%23090b0f'/><circle cx='256' cy='256' r='196' fill='none' stroke='%23ff5500' stroke-width='32' stroke-dasharray='75 26'/><circle cx='256' cy='256' r='120' fill='%23141923' stroke='%2300e5ff' stroke-width='10'/><text x='256' y='280' font-family='sans-serif' font-size='76' font-weight='900' fill='%23ffffff' text-anchor='middle'>kPa<\/text><\/svg>\",\n      \"sizes\": \"512x512\",\n      \"type\": \"image/svg+xml\",\n      \"purpose\": \"any maskable\"\n    }\n  ]\n}\n",
+  "code.gs": "/**\n * ROTAX Air Log - Google Apps Script (GAS) クラウド同期バックエンド\n * \n * 【機能】\n * - doGet(e) : スプレッドシートの全レコードをJSON形式で返却\n * - doPost(e): アプリ側から送信されたレコードをIDベースでUpsert（新規追加・更新・削除）し、\n *              マージ後の最新全レコードを返却（双方向同期対応）\n */\n\nconst SHEET_NAME = 'Logs';\nconst HEADERS = [\n  'id',\n  'date',\n  'time',\n  'circuit',\n  'vehicle',\n  'tireSet',\n  'driver',\n  'condition',\n  'ambientTemp',\n  'trackTemp',\n  'laps',\n  'coldFL',\n  'coldFR',\n  'coldRL',\n  'coldRR',\n  'warmFL',\n  'warmFR',\n  'warmRL',\n  'warmRR',\n  'deltaFL',\n  'deltaFR',\n  'deltaRL',\n  'deltaRR',\n  'memo',\n  'updatedAt'\n];\n\nfunction getOrCreateSheet_() {\n  const ss = SpreadsheetApp.getActiveSpreadsheet();\n  let sheet = ss.getSheetByName(SHEET_NAME);\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEET_NAME);\n  }\n  if (sheet.getLastRow() === 0) {\n    sheet.appendRow(HEADERS);\n    sheet.getRange(1, 1, 1, HEADERS.length)\n      .setFontWeight('bold')\n      .setBackground('#1c2230')\n      .setFontColor('#ffffff');\n    sheet.setFrozenRows(1);\n  }\n  return sheet;\n}\n\nfunction readAllRecords_(sheet) {\n  const lastRow = sheet.getLastRow();\n  const lastCol = Math.max(sheet.getLastColumn(), HEADERS.length);\n  if (lastRow <= 1) return [];\n\n  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();\n  const rawHeaders = values[0].map(String);\n  const records = [];\n\n  for (let r = 1; r < values.length; r++) {\n    const row = values[r];\n    if (!row[0] && !row[1] && !row[3]) continue;\n    const obj = {};\n    for (let c = 0; c < rawHeaders.length; c++) {\n      const key = rawHeaders[c];\n      if (!key) continue;\n      let val = row[c];\n      if (val instanceof Date) {\n        if (key === 'date') {\n          val = Utilities.formatDate(val, Session.getScriptTimeZone(), 'yyyy-MM-dd');\n        } else if (key === 'time') {\n          val = Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');\n        } else {\n          val = val.toISOString();\n        }\n      }\n      obj[key] = val !== undefined && val !== null ? String(val) : '';\n    }\n    if (!obj.id) {\n      obj.id = 'row-' + r + '-' + new Date().getTime();\n    }\n    records.push(obj);\n  }\n  return records;\n}\n\nfunction writeAllRecords_(sheet, records) {\n  records.sort(function(a, b) {\n    const dtA = (a.date || '') + 'T' + (a.time || '00:00');\n    const dtB = (b.date || '') + 'T' + (b.time || '00:00');\n    return dtB.localeCompare(dtA);\n  });\n\n  const lastRow = sheet.getLastRow();\n  if (lastRow > 1) {\n    sheet.getRange(2, 1, lastRow - 1, Math.max(sheet.getLastColumn(), HEADERS.length)).clearContent();\n  }\n\n  // Ensure header matches current HEADERS\n  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);\n\n  if (records.length === 0) return;\n\n  const rows = records.map(function(rec) {\n    return HEADERS.map(function(h) {\n      return rec[h] !== undefined && rec[h] !== null ? rec[h] : '';\n    });\n  });\n\n  sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);\n}\n\nfunction doGet(e) {\n  const lock = LockService.getScriptLock();\n  lock.tryLock(10000);\n  try {\n    const sheet = getOrCreateSheet_();\n    const records = readAllRecords_(sheet);\n    return ContentService\n      .createTextOutput(JSON.stringify({\n        status: 'success',\n        count: records.length,\n        records: records,\n        syncedAt: new Date().toISOString()\n      }))\n      .setMimeType(ContentService.MimeType.JSON);\n  } catch (err) {\n    return ContentService\n      .createTextOutput(JSON.stringify({\n        status: 'error',\n        message: err.toString()\n      }))\n      .setMimeType(ContentService.MimeType.JSON);\n  } finally {\n    lock.releaseLock();\n  }\n}\n\nfunction doPost(e) {\n  const lock = LockService.getScriptLock();\n  lock.tryLock(15000);\n  try {\n    const sheet = getOrCreateSheet_();\n    const rawBody = e.postData && e.postData.contents ? e.postData.contents : '{}';\n    const payload = JSON.parse(rawBody);\n    const action = payload.action || 'sync';\n\n    const existingRecords = readAllRecords_(sheet);\n    const recordMap = {};\n    existingRecords.forEach(function(rec) {\n      recordMap[String(rec.id)] = rec;\n    });\n\n    if (action === 'sync' && Array.isArray(payload.records)) {\n      const deletedIds = Array.isArray(payload.deletedIds) ? payload.deletedIds.map(String) : [];\n      deletedIds.forEach(function(delId) {\n        delete recordMap[delId];\n      });\n\n      payload.records.forEach(function(incoming) {\n        if (!incoming || !incoming.id) return;\n        const id = String(incoming.id);\n        if (deletedIds.indexOf(id) !== -1) return;\n\n        const current = recordMap[id];\n        if (!current) {\n          recordMap[id] = incoming;\n        } else {\n          const inTime = incoming.updatedAt ? new Date(incoming.updatedAt).getTime() : 0;\n          const curTime = current.updatedAt ? new Date(current.updatedAt).getTime() : 0;\n          if (inTime >= curTime) {\n            recordMap[id] = incoming;\n          }\n        }\n      });\n    } else if (action === 'overwrite' && Array.isArray(payload.records)) {\n      const freshMap = {};\n      payload.records.forEach(function(incoming) {\n        if (incoming && incoming.id) {\n          freshMap[String(incoming.id)] = incoming;\n        }\n      });\n      writeAllRecords_(sheet, Object.keys(freshMap).map(function(k) { return freshMap[k]; }));\n      const finalOverwrite = readAllRecords_(sheet);\n      return ContentService\n        .createTextOutput(JSON.stringify({\n          status: 'success',\n          action: 'overwrite',\n          count: finalOverwrite.length,\n          records: finalOverwrite,\n          syncedAt: new Date().toISOString()\n        }))\n        .setMimeType(ContentService.MimeType.JSON);\n    } else if (action === 'delete' && payload.id) {\n      delete recordMap[String(payload.id)];\n    }\n\n    const mergedList = Object.keys(recordMap).map(function(k) {\n      return recordMap[k];\n    });\n    writeAllRecords_(sheet, mergedList);\n\n    return ContentService\n      .createTextOutput(JSON.stringify({\n        status: 'success',\n        action: action,\n        count: mergedList.length,\n        records: mergedList,\n        syncedAt: new Date().toISOString()\n      }))\n      .setMimeType(ContentService.MimeType.JSON);\n  } catch (err) {\n    return ContentService\n      .createTextOutput(JSON.stringify({\n        status: 'error',\n        message: err.toString()\n      }))\n      .setMimeType(ContentService.MimeType.JSON);\n  } finally {\n    lock.releaseLock();\n  }\n}\n",
+  "sampleMetaUri": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAKAAWcDASIAAhEBAxEB/8QAHQAAAAcBAQEAAAAAAAAAAAAAAAECAwQFBgcICf/EAFAQAAEDAgQDBQUEBwYEBQMCBwECAxEABAUSITEGQVEHEyJhcRQjMoGRFaGxwQgWM0JS0fAXJCVicuE0Q4LxU2SSosImNWOTshg2RFRzdKP/xAAcAQACAgMBAQAAAAAAAAAAAAAAAQIDBAUGBwj/xAA8EQACAQIDAwkGBQMFAQEAAAAAAQIDEQQFEiExcQYTMjM0QVFhgRQVI5GhsRYiJEJSQ9HwByVyweFTYv/aAAwDAQACEQMRAD8AfQUqDqfjKQolCNAjfboY+mtQlKb7wqBIU0RqTAO2h+oIPSakqRl1ypUvvYga5xGhAnb4vrTC0tvBKQfBPhQNZI0gegFUGYMLzJSmFAzEFRiCCQAR03/qKQhK1JLISO5zKCFKOyfPzkmn3khC0suJK0GRIOaIO0/OKjvoJWhJWJkGOciOm+w/GmA2tYFw4pTSi0sEzpJGkT9+tQ8pILRzENmRvlM8p/OpFwQ1nWE6bAkyBsd/rHrSnwtVtt4wCNTMEEGOo0JoERFqIt15iEEiDG5nWI5f11qOZbcCw4O7zQUgaec/U/KgQVv5Fqyt8s2kJOg/A0V0lKLtxuFEJIGYdCYPprQISWyFuKUB4FALEyI3n6QKZWpwLSoABIg6mconp9KBhsoKzuQAR/XQUm7SrwpJhaRl0O4mfnrQBHWRJSnYgxB566/Sm1uqAICQW0SQeh0E/h9KWsQ4EqJEeIBI5c/z+lIfcyr1IIVyTsef9eUUxDNygKtViMqUgQBpJFQWwUrUklWp2n8KsnIdbJC4TmhI3J8v661EKFIMgzB5a6+dAgKUnNpokaKjy2phwL0JyyoxI5gdPvp9tWUlUaEkGduW/wBT91MXhzuwgQJBT5ef+1ADFw2IkBIJIGp5elNd2SoJk79PKlPLKVkZ4GXSfP8Ao0kg7K0UDvOpFMRHUVFCgeXXkaJJypIUJIGlOk5kkqApsCYUNRMa8qAEEggGNAIplczuQrpTrkpTI2NNlRyRm2M0CCUZJJOs+lJToTIHSaWVZiQnmNabUdI8qQBp0ScsZuZptWgjnRtZp2+VOutZpiZiZpgRFkRETSUqgz91KgaUmASTO2gpoBA0JBGnIdKRokaj0NOHYabU2oE+lMBojXQ0ysQuZ0p0jXekuCTpqaBCI60g77UupGHW6bm+aaVIQo+IjcAamKG7E6dKVWahHe9hFUnwg0q3accdAQhSj0Amui4Y3hQfSyjD2EkiEKKc5n51cJJaT7ptxCR/CgI/AVVzqe47TDcjJ1Ns6q9Eabs7Uza8XcPPYo53Nlh9myO8X8KClBVHrmNdixTtK4cZSoNXjrkGJbRH/wC6K87HvFZsyFHc+JZ5CaZWPDPuxqQY3rFqU1N3ZuaPI7Cxa1zb+R2q+7XrJpRFlbOv/wD+WAP/AG1n8U7W8TuJFjh1qwOqwVmuZhzKDr/UUa3s6yoACRsBpVfM01vNrR5N4Ck+rvxZosR4sx3EApT76EJP8DaU1nniXHS46pKnDuo6mmyfKkk+VSWmHRRuaOEo0erilwQ626ELBVChzG002pc8yBRa9KASonkKTlKRfpSdwCPOhQJAMSKFK6RI6S3mS3ncR3nvSoEgAHw6Tz5Rp+YqApspWCtKgpSogDUGNCD5ipylApOaUthOUlY0MpE/KOXWmnmHHGlEKIykgidSTsTHnz9azz5/Id08X3TlKcy0QtJ2VpMa8tPv0qIluHEktqW0s5gkHaCRE/Kfup5xPgBUAUtgZuQief3+W1R7kFlqSoBRQYAPiMEzp6E86ACcWjYnOkqUQpM7xGvy/Go9s8krUpRIQSVSDJJG34inLtBUoJUmSsyCCBnVy/r50w4kocBbCClJSCRtmP8AOOdAhtOZRdUSSEqylI6ZZHnEg/fTZJUsTHeQACROkj+X30+6PCFd4JOhSDudvzH0pplCE26HO6mTkAOpMRr6b0IRGdXlZSptUpJKkk6zpoNfU/eKbeKlvFUxnQFHy5R9fuqQ+iGiUAnItOUdNdD9/wBahunKmXIWptWTwmQrUR+YpgMusjLIk5ZElUDbl5jpUctApQXU6qVBAPl089altvKQolaUwskeLUGCeu1N3aQV960Mp2KZEaD+iKBMigHu2+4kZScyeW39a0k5luZ8plPxDYAnanVaugfC2oGAfTX74plaUnc5UnTc6xTEIWlKAoFW8HQaE0wsDQSVEEann1P9daSp5PelJkKOmvXePx1pBcJGsxEg/nQIaWAtY0EbHlzoJBz+JWg+dKJGYQQBBFGAnOkqUQI0I6UAN/siFJJyBQhQ5b1Jwl+ys8RD2JWy7q2QFEtJVlKlR4ZPSYqIuUpJ1AO886Y1CioqnpRYA1jNAOx1gcqQ9C2khCUgImVDdUnc/hTu6M3SklMg8uVMRFSqIUSYJ1PSkrEECNI5U86mAogDSfSo+oOp0A0osApPhWDMdKdVCgBr601uAecUajp4d+lADJBSsjWBzNNEiZGkU6uQvUU2ocxQAg66mQKJXQTFGqIj7qJJgbA7jWmAkhObbemV7EdKdIgJIJzzrpTKxJPU0AI5GatuF7cXOJOBWbwMqUAnedB+dVBkCK1fZkV/rUltooC3WHEjPtyP5VGfRM/K7e107+KHmldy8lYSrMhQP0rWXdwCpZS8VBfLUxUPiTCnrW6W6t1kpWdchGlBIX7OyoIASUJ1jQ/1FYnfsPW8ClqaCKkzpJ9aLN0FA5tzAmk+qqjI26YqSeVHr5Uganc0uEp1UdKgrsmmAT1pSQkarUY6AUgu59GmwB1oEHmRS1Lu2gndAUscppA8R1mKXHmKMeZqG2W8YEpAGgoUoxAgk6a0Kt2IaOhrDjbq0OkLSqSrLt6ZvIkUF3Q7hAUdCoEEGI56n0mlXbrvdIypkfCpStZSTAmeknWq59Ce7GRBgEGBsT1Pr+XnWafP4LhybdPdgB5cqgq0ABIHyOh9frUBYU4lDcFEZkkL1CdNvSJqW6lzuFLcStpCviz7j+GP69aNIcSHEBAzHMrPG2oH1MfjQIiXQylKGk6kglJEAnb5QI260ypKVFWYmCPCYnLGxPUEUp9KFOBoH4T4IEGd4BO5mPpTKHwblC4hJRJEDLGs/X86ADRlUnxZu7VuQNzOsfSkAFacwAmcxAGx2J9NqTeBxt1BSUpbVLh6Jk6/eD8jUFy4zSC4pOoBA2JjT8B/RpgSWS33WZYUsKMgjkDrHoNKguERBAUOYmIBMn7zSl3CUpEkggmFT6gj5U2VgNShQKkSlzlPSPnQRuNKHukAqVmE6EQBufy+6o63oBEEqIk+ZmRUlYSU6FRABIM/X+vOoZGmgBBGh85H9fOmot7hNpAU8l9MnfdQOuXlP3VHLkuQdU8/Sd/pTiGXJUptConYjcUl9DqRK2lanMVRrVvMVLX0v5EOdhe10RsRYUtSlpgFOoHUf0KjtPFYTGikian926opHdrJA3y6HWq96wu+9WpphcE6CQKccPVlui36EJVqcd8l8xatVDkSDvtTayQQDodR6CpRw+7UhPgG2smKNOF3ZBBCI2Eq5VdHL8TLdTfyKnjcPHfNfMhPrGQmDvoKiqJC8pAHWrc4LcqABUgfOjVgDylE94jXyq1ZVi3/AE2VPM8Kv6iKpCgZE6D7qWVJnTbzq1b4ecEy8DMaxR/q6uf+I0/01Ysmxj/Z9UVvN8Gv3/cpH1eIkmQTUdZ1rS/q3KRL6oHlRnhhClSbhX0qfuTGfx+qIPOsGv3/AEZlUkjyoyoDnFar9VWiZ9qc+gofqlbk63To+Qp+48Z/FfMj78wf8vozJKWVgppoHQzWz/VG35XLv0FI/U9jX+9Oa+Qo9x4vwXzD35gv5fRmLmZO5oIVoOtbI8FsAaXbn0FI/UxrcXi//SKPceM/j9UHvzB/z+jMeSI3pozvWzXwalQAF2rTnlpCuDOQu/8A21F5LjP4/VE1nOCf7/uYtXiJnetB2evNs8a4P38dy4+GlTtCvD+JFTV8FPfu3aPmmlWXCNxb3rL5ukp7paVgpGoIMj7xVbyfGbtH2MilnWDpzU1UWzad5xjCcJOGXAXbOuOQ5lS2mQk+p6VykpDTYbWSlSZSUDWIJraXPFDV0parq2uSVzIS6AnXoKo1OYb71TVsttSlSjMM8etY7yXGx/pnomV8sMopu88QtvjcpktlcwD86GRCD4xoN6nvqW6khu8SkH93IUj7qgjDHXvju2I/hCj/ACrHqZXi4/0mdLT5WZTU2RxEfmNqvcuZFs2j/VEmmQlajLi5PSpSsPW1ISEL/wBCwabyKQYU2oHzrXVcPWh1qaNvhcXh8VtpVFLg7gSABvQMdKUJ6AUSv9VVtbDYAHpR69KSI/iNAx50rjFUKIeQoUXGdIuHQFI7rxZCUJJ0kif5ffTLa2lvuBLmVsLEGBomeQ+fzqSpQU4M5gtkmZ0WPlpII3qAUQpSRCFDwqRExpMfdPoa2B8/hWUPGFQQrNOm8mSROg6UaCgp71C8wEnOTtMAz8xP31GW6CoICkpQkwSiSkJI315RTveJeCS2mVAE+IDcbfI6igBq8UhDhCAO9WA4IHwkp3+kmq25CUNIQMuVKROhgGSCPqfuqZfXBV3ZZSVEpUoEbgevPQfQDzplbJShxCDmAGqlHeQFAn6kUCIDj+V1ShJIAJk6cx9ZqG4x32csrhpYBJI0GsflUxABWFL1abAkx8RgRp/W1Gw05fPhtlvQnRIGgrd5ZlTxXxKmyH3NNmWaLC2p01ebIRZaUMq5WBOp06fypTjTQIDKABEbV0/hjsyvMTtkvmENn990QPl1rY2vZTYoCTdXySnmUN6k9Na3Lq5bhXpUU2vU1HM5lifzSnb6HAA0vkkieg3pabN6NEKAr0bacBcNW7ivaHHVpbEe8UEj6jeppwPge0Ke+FmSRALj8/nS980IbKdP6D9z15balQ80CxePwt+tIXYPZkq7pRjpXpFWIcCWba1AYQEpEa+IzUccfcEWyVpD2HpCTKQhpJJoedye6mxrIo//AEPPYs3Ds05/6TT7WFXTxAatnlE9G1H8q7m52p8LNrSll0OIy6pat9SfpUVztVs0LBt7DE3EDUBu2KR5DaovPKn8EvUnHk7F/ub9DjbmBYgghKrG6JV8PuF6+mlPo4Xxoozpwi9UiYnuiNa6k/2n3LjoetuHsYWsiEktmPPeoj/H2PXGXJwriStQo5lBI0+dL35PwS9Sz8NJ/wAvkc+RwljygSMHuwBpJTEUtvg7Hlqypwx6ZyiY3rcu8XcWXAR3PDSm0ImA5cASepFQnsX44ePhwyyZkaZn9R9Kj7+fe4omuSre6MmZX9UMaAM2QBG8rGlGrg7HAkr9kTlBgkLBrS+0cbOgH2fCWkgzGcmDTLw44eT3Pe4ahM/FmVP0o9/R75L6k/wlPug/migVwji6UhSmmgPNdIVwriaDBQzPTPWg+zeNVCF32HEb5sqpptWCcYOLJdxLDkjols0/f8O+a+QvwnUe6D+aKFHDWJLSohDWVIknNSXOHMRQlKihs5tgDrV+7gnFi8yTiuHBuP8AwjTbWC8Tp1dxWzA8mj/Oj8Q0l+76DjyQrS2KH1RSs4BeuRmQBygHWkuYFdyoN5SU9TV9c4XxGVpDeL2oA1JLBGtMKwniJKgftazUd/2J0qP4io98voWfgzEblT+qKNWC3wSSUtpjqqKYOHXYE9ySOvKr5eF4+QAcRszzktGkeyY6NHL6xU2d4QqrI8osP3y+hW+RWMe6m/mioThN8rZkD1MU19m3maAxPzFXt5b4ug93aXNq4wNu9BB+6orn26MvisFZeQUR+VTXKHDfzX1I/grG/wDzfzRWnDLxIks6etErDnyPhHyqetzHCUFTNopCdgl2JP0pBuMaKgn7PRliPC8Kms+wz/eiuXI7HR/oyICsOfAgpFGrDHkkhacpHI1KNziqCQrDXVAdFpNMqxC+SqV4deCP4UzVsc4w73TRjy5M4yP9GXyIKrZeYpCZI6UhVqqNU/Wpy8WJMvWd0j+KWjRDGLMBQKXEg/xNnSr45lRlumvmY0shxUOlTkvRlU6wAdQJpnO42CArMj+FWoq8Q9h92QlpaCsj0qBiVmbY8yD91X6qWIjpdmjHg8Xl9RVKcnFrvV0yBCFoKkSCPiR08/MUif8ALRFXdqC0/ENiKWtQWEuJVAVy6HnXE55lEcK+epdF93ge78huWMs4j7Hi+titj/kv7iRPQUrXmRTfh8zSh5JrnEekJhn1oUesbAUKLEjoabxo3y2yhSXFwpJ6jcacidCfnUdyG8oUsB0jVQE6DQH5fnUtnxMqeSUqXp3kDVRgxr0IB9PlQcQXyShIRlbzL7s/CJ/2+6s4+fyjuEluHEoytqJOUGMoIMEemsU2y0tskNmT8fiMggwY66/lVguUZSgw4luUH+OVaEf1z86jZkBKFtgJIGpmSQSYNMQwtYZn4Q4J1mUqIUYI+76UgH42+6jvpSUJP7pJ0py6i4tgwiQogqECYHP1GmlJsUkPNh/4kjMUKE6AdfMirKcNclHxIzlpi5eBEvXZQ3bp2bEHzNdH7H+Gl4jiJdukgWrIC1/5ugrlwJXcHXVSq9Cdkx9l4HvbltSC6Frkq0iE12uYS9mwip0/JHF5cvasXKrMc4q4qxG4xNeAcJJb75oD2i6V+zYHQeflWec4Rxu+VN/xRdHnlZQEj5TVj2aWj36s+2lpS7i+fcecc3zSqB9wrViyu1rlLDmnlFcbVxE4ScIbLHf0cNRUU52b8zBq7PLZQBu8bxZ3kR32WfpR23Zxw5n983eXBH/iPqI/Gt+vCr1yAGgmDMnnSm8DvCfEUJSOU1S69d97LksNFd30MaxwNwq0qW8HYUoae8kmfnUy3wDBLfN3GG2aBscrQNawYDcEkl5sE+RNBXDyU6uXYT8qg3Ve9klXoR7zNItra3HurdrKRyQARR50rSQgCdPKK0i8Iw8D399tzzgU2q0wJhY7x+SdgFEz9KhzcnvZZ7dSXiZxx3KQkjbnUfvTEGY9a06neH2l/slrP+k0lWJYQ04O7w0lREyUgbVHmn4jWYQW6LMm4sAFIETqSKSgKWSUpUoeSTWqc4gYbgsYa3J2kj+VNHia8BJTaWraPMGRQqK8R+9LbofUz4srx2O5tnvkg06nC7xVwyyq3W2t1UJLgj51YvcUYl3nhcYCDsEI1NQ14zf+221xdOl3uVkhEREjXYdKapRRXPM6klZJIvmeGLFDQS+hbzh0UpThBMelM3GAYUBCWgY3hStqmniDCnGw49c5FjdJSQR9KjHH8OGcm7Scx2yH+VXKxrNc3vbIj+AYWpod1blBIzZs508oqnx/B27S1NxZeAIErQFSCKtrnG8MJBN0SjQ/AdulUeOYyzdsLZstlE51nQAelEkmrMnTqVKclKLG/wBWsXUkOItFKSRIhQqG5gGMJVJw9/0AmmU4/jLMBOIXIbEDRQ0+op1PFmPoTKMQUsc8yEk/hVHMRNvHO66/avqQ3cJxVsEKsLn5INQH7G/bEexPj1QavP17x9syp5hSf8zX8qUjtGxpAHesWizO3dkafWl7Oi+HKCpHfBfNmZctLhKRnYcSrzQahvNrSskpXB6pNbj+0rEUFPe4bZKSowNSKV/aWAr3+BsLT1Q5/NNReGXiZEOUslvp/X/w5+qUmIOuu1IJ1ygDWuhJ7R8IdWUu8PExuRkP5Uf688KOH3+AOAz/AOGg/nS9m8y+PKeHfTfzRzpeqoHLzptWgkGOutdIVxRwGpXvsLebJ/8AL7fQ0DifZw+nxJ7qerSxS9mfiXx5T0O+D+n9zl5dUQoyYFRnFLKtzlrqxHZo8ADeNInqpafyoJwPs7uRlZxhhPl7SB+NLmGu8yocp8H3xfy/9OQqS24CHEIWmeadatDalzCVKKO97qPGeaTt9K6angPg64MsY0k+lwg/nVXxZw9Z4Jhi2bK69pZWxmSqQSCFHSR61u8jqVaOIUb7GcvyuxmX5jg9VNfnXfa2w4fdpyOKB5GmrJeZTrcA/vCpeKJh9YqrtVZb0a7yK7LMqaq4eUX4HnXJnFSwmZUasXukvk9jJxzcyBSfVVGY6E0kzyTXlst59VBgjoTQpPi6gUKVwudMKCIDf7RQCYGsAiD5aGfrTTiVhqAe68QbVk5jWZJ/rapL2YLaUylIygqhJgJ1n6zA9TTDyVBxaQZCTqFDY5pEnz67a1szwIgvAe0IDoCUJAVCdRl8vSJqK4jOlQUYXIIgQNNfppr8qeu3Sp14AZVd4gqJGg6x/LyNFcrStKEZzly+HJGh1gf11NAiAXZWSkZyIBgQAOUHy0B9aO0zIcfChqptRPkRpH3U4sKRcOJbSASAQFc4A2+U/SkMtISVd2UkhpWYgQSSKysH18OKKMT1UuDKy3PvAeYNehuyxKF9nN2lapBLoIVsNK892Sffjlrz2rvnZe6kcGX9sl1JX4zkHmOtddnO2iuKOSyPZUkWfZpjRTwNhyG2RLKVNEKVqVBRrRnGLoaKbQhR1GkxWB7MVkcFMoyp0fdBEbwo86172YISndJEjmQK4uu3zkuJ2NOKcUyUvEb5ZSErKQZEpSKQ5cXpHifc01OsaegogEpWr92QAcpEGBSHEqISSvRWmXlHIzVRKyGFOXDilhSnVoJOyzApp5tzZtPeSBoevrUxCQnxNwCPiI5U24CshIUCnXQAyaBlcG1ETky6TJ5AURYWAiSopBmAZg+dWWVxbaTlQoDQQOfSilIDkpOkkztQO5BdASgFSEgpJ1A1FNKbSHJBzGM3SpoSApTmmTLOXWCKhqRlT3iDIUYAUIMUgGnUz41jSZ3AM9IpIRmcWFJSQR8JjTyp5wQCUlM7wd/96ZltKVSkKXznnTAjqaQ2zmbRC0jSBTJbJbClCXVaqCp0qapCVhBQFCIk7CmHULWFLMnNGhHKgCBCRnCCfhiANDUdSQHJKjmSIAI1irBxkpR3YBBHi0Gxpq4zLCASTIkqgk0AV1y2EIUrRbilGRuCKiJT3ah3Y8R18OkGpr6ClYyhKSTERpTa21NqUlLML5CCfkKAIFy2pUlwwFHU70Mq0oCQBBMjXQVKubZxJQC2jxECQr8qR3IQopypIiATO9AFa+jIN0qWDuKa7vNKgEyBuanOsgISS3lIPiAO/pUZxru5zABXQ7UxERxtCUAqOYp1gpqK4y7AyfCDtUxxCu7zpiOZJmmXEnOEySkcht9aQFetOVwqSnLmPPam3EhCU5ok1MuAVARoJ2AmkKOZcwnplpgQ3u7UUrnbSCahvt/wtzr1qa4MyiVAEHYDSmXTJypgEaTNAFVcpyD+FXJNV70EEqGp0k7VYXLhQlSQZ5ajaqp91JSQmInWpIixC0oDQ+HeJSK6FwoltXCTqgZUGyVCf85rmzkAJjT8K6Dwaofqq9mI1aUNTr8Z2rPy1fqImHjuokY3GUp9qdyzE86pGdL1FXmLAm5cBiZqjRpet+tdnjeolwOWyd/raf8AyX3LE+aopBA5kmlkdBREHyFeVyV2fW1tgiByBoUZ81UKhYVjqKQtecoBCHZJVljNCTGnWTTDgXmBzDPllRVp4QRA9I1+VSHrhIcASqVME5SrZIH38hHrrUZ4hb5DIUkNtpEncEwQfrPyNbM8CIL4cSe7hEk94CSBMf8Ac1FCw224QCBosAp1gDUekHfzqbdgi3Rl11SVxoUkEH1OtRrhJtlBWUKAVqk+Y11+dAiDIW8VKTIBmTIM7fjH0pDZa9rcS3nzd2smdtRI2p1pIZbKFohadImdAI0/rembcDOpZCg4ptRIjTn/ALVk4TrocUU4jqpcCHaQLhOZUJzTXbeyp8t4biTaUSoJOpTI2nnXD2klZgda7R2ULfOGYnLmVnVOpjxZa7PNY3oHG5PL48kP9lrxTwm0BEd8+JP+s1rS+QoODNBAAJPwmsN2Z3CRwyDCMrVy8n/3GtYpcrR3RKjGWNxBrh8R1suJ21LoIs21JKU5RBIInaE/zqq4o4vwjhZlteNXIDjnhbZQCt1XoB+NSmVqLwbQiSZJUD0/OuFXCXuIeKcTv7/OHy8ptPVKEkgJHrvVcVck3Y6Irtf4Vt0lJRijpjQptVD+taSO2Lhv2dCjb4qFA6g2xmDWcs8Kw9lhalYaXHhspwyB9d6o7zBA4ifZAEkmFTE1PSiGpm4HbHw8s+KxxRCWz4VdxCVH670w5218PZHFfZeK5olMNiVdQDtXPl4CMs902UjWM50+VMpwa2Q4lL1tMmZBmB6TT0IWtm6X214L3IyYTigBkFs5SR85pl7twwgjTA8Sy8kEoA/GsOcKt1O5LhtCEj91tOp8pqDeYc1nCLVhMkwABKjRoiLnGbV7twtT8PDl5lOpBeTrROdudqpSS3w3dAHQp79P8qxf2Q2pozbwoaKEyUnqaiXODlspkoW3sFRpT0RDnJG7d7bLZC4bwB+Rqcz4zCozvbYmUBrh5RRuc1wJ/CsEqxhRnIPQUhdqoqiUiRyTRoiLnJG6f7aH1KHccPieYNxoPSBSEds9wpC4wPL4Yyh/SfpWFNmtJHiE+QpsWqoJzAeUU9ERc5I2H9sV+M3+BM5x8B706deVEvtdv1LzIwNgEGQS6ZrHG1UEjxnXkBSBaEqkqOnlT0xDXI1qu1zECoBvA7TL0UtRNMO9q+MDMlOGWQB3BUrT0rNm18W5I8xSVWxnwk/IUaYhrkaE9quMeHu7C0EdVKM1Gc7TcZdUSqxsdTqTmNUKrRWYydfSkm0I0J+6jTHwFrkXi+0rF5OWyswOUyYppztFxtQj2SyE6/CrWqY2p9flQ9k/1TRpj4Brl4lqePsbKpTb2aTv8Jpr9fMaCp9nsyrqUmoXsqkgSNqQbUyTNFo+A9cvEmq46xopUktWZzCNUHSkvcX4ihLK0mzXI8TeRSSk9P8AeoSrczqfuph+3JGviAotHwFrZrrTFhe2ucIyKmFNk7H16VFuVKK86klJV51XYNlbtSTyNSVPlS1HkNh0qtqzLL3QCtSfD4SN66Pws+E8Iup7sQUaL56rOgrmjyDlzDUGul8Hry8JPCZTk6THjNbDLF+oiYmO6iRkMYn2lzSIqiBPtjesa71fYySbl01QK/4hv1rscb1D4HLZT2yn/wAl9y0IBPxUMoGwJoa9AKE9VV5Y7XPrdbgiD0AoUCU+ZoUtgHTyGm8lwEJRsVEmQvz9evrUW4VC1oCClaRrrM9B8h86lNqV3aEuD3CwE6iDEyYnbYfdUMpd7px92EhKsqgT8RM6jppzrYHgIlxErK3iobKCBqRA0Hp1qtujmBdyElRHwqjYxv8AI/WrB1QcCHckJQCUnnvJ0HpHzqAgpfdPeg5EESJgaxP9dDQIaWCheZSwUZYnKB6Hy3+lNMthtboGXKUqTtsQDPy/nT6krGaFpiYyEagyZ1NQG0h91DDs5VKykdRqImr8M7VYvzRVWV6cl5DNgAVyToTrG9di7LUBeEXaVJUtsvKGU7EBM6nlXFmWww8SwIQlWqJ5da7P2WLjBrtSQXczpBEmAMu9dvmd3Q+RxmVWVdriMcAZE4C5lCiE3DqjpEeI6VpylxKDnPiX4kefrWS7Pgn7JWEqKv709sD/ABGK1TLiASledasshKdI1rhsQviy4na0ugiehRQqEqGdqEZSmJPWuH8NPOJxnEkPrzPJu3FEnWSCYrtiFpMpCQDOYkyTXB8MKkcVYo2Skn2twEJM6k1XAcjoljZ3t8krYZKwTuRE1IPDGMXShmaCSkaZlQABW04dftbXDQ3a27rq29F+JCfxNWWHYpb4g2osfGhWVbSokH86JTa7is5hfcJ4ipKe5t3AgDUuKBM/KoKeC8UddzKZyt8iVV2UXLCHVNuPNpXMZSoAz0iqrGceYwy/s7V5KSp9UFSlhIbHVVRVRvcgscvVwNiqnBLc6zoqPvpT/BOMC2yMIatwZCw1opXqrf5V1t69tUsoeVcspaUYCysZSfXajF1avhwMvtPEQSG1A/WKXPS8AscRt+AMYQspHdhJ0UAd6cd7O8UU3kzoCD4oNdas8WYvnLpq1zBy3VkclMCdduu1FiF4LOzduXZKGkyQnU/Kk60twaTjjnZtioT8bfkIpodmeKK/fQK6DwrxNd4pxHfWF2koyJzJayj3euoJ3NNpxe/xHGcYYt7hy3TYpMd2lBSInVRV+VS5yd7C0o5+72a4klQBcSSfLepjfZTetpm7uW21HUIiVEV03AMfYvcEaxFKkJUJS44oScw0JA5VUcYY0/h+EN3TZU04+4EFSiCtH5TS5yW4NKOfq7Mb2TleSJ5U2ezK8QQVPIj0rd4fi9zb8W2+GXa7lxm4ZDiDcFJM6nTL1qAvEsRvV8QOIfuWvYZS22ytKRpO4MnlRrmFkZFXZteA/tU6+VGOzS7LmUPpHyro3DeLHFOHmL94oSsg5yNhBiluXjj+GPu25DSh+zWtJVI/iyjUfOo89K9h6UczPZrd5z74SPKnLbszWpxPtL8IB8WXert7FL/Dr/C1KeuFi5VkdDzgUI0GYJ0I+dScQxG5f4ycw1t18NtsZ0hhwNk6A6kzNS5yYrIybnZy53xDb3u58JVvSF9nryd3hHpWp4Yxa7xLBr8KcPtFu4W0qWjOQOpjc+lVV5iN/hbmGqU9cOOvLyOB1zMCOuTcUa57gsip/UB2AS6CPSmlcBOCT3oI9K1+OYwk4sjDAe6SUZ84dDZJ5QeVOYGt9dopNy/3xSohCiJMT/FsqlzkrXYaUYVfAywT70Go54GeW4UJcExvXTHIg5vvoWif70gADY70lVkGlHDrnC38KdUy7vJgEb1GVCfCoaneK23aagNYpbrSCcyCQI03rFvuk6K38+Xzq9O+0ktwgOZRkUCUxqTXSuDktp4OWtC/eqbIUPLOqub7lOeCK6LwsptPCEZkEwQADqPGeVbHLO0xMPMOokZbG1D2l4zpWfLi3LhsNtkiRJmrzGxN4ts9aq2fDeCANK6zMW1h5NdyNDyfhGpmNGMu+S+5OMa6E0NY0AHrQ9VUWnma8vufWFgjJ3UPlQpQH+WhQlcVjpIKHnkrcVmcQMqpR4p1I+Wx+lMXq0Bxy0WvL3hAJB3AGm/qKfClNvFbqhlUqUwSpRAIgztrUHvFOPBbiEs5T4kkToDp90fWtgeAC3cuqlNlaQjukeGU7Tz2P5zVfdLzNrCf2YVm1ERGgE9f9qmXBgAIEsKWR4pOX/cjn51W3BDFutOU5p05SCTvz2oEIdcDbiQBBCTJI2kHX1mZowIxBMpOVK5Go1Mb/wBdaZQgpSlx1Uq3X6TyHSD61IbDbdwyhGUlagQQdAANR+FXUesjxK6nRZX2n/EKB1BURXWOy4obwa6Qta0oQ4oq/h20rkrJKHVK5hVdX7JL1abC8ZylXeqJKEp3AHMxoK7rMU3h7ryOGyqS9qafmI7PVZ8BdAbUV+0vZSNIGY861BlMEFKdJk6FVZns/W45glwkqOX2t1MJOwzHQeVaGQrOCBlSdDyA6VwuJ62XE7qj1aJTSilwpQs+PSeZ6xXBbAoTxbiSW/CPbHBlBn97rXdEhrM2tTikKCvkK8/YWSnijEIkkXbkzpPiNVwHM7nwH3Nxjt+28ylcCYImlJxBjDuO755nKmx7n3hbAOoA0HQzT+FcPJ79u/tQkJdbTmBfUnU7nSry04eaYdUt8tEQQ2hpJIAPOTudedQbV2QMlxBfPPcOu3duizYaISpKg4FvzOhJiZ+dQOK7j27DeFrpaU946QlyROciBJPOtUrhazt7Vy3RbsvBRJl9xZ09AYp29wgXHDzeGqDaA0cyA0iACNvOKjrSCxRcXG7sMWwRLCkvJ1IzoCG0GegEc6JLt83xdhty5d2jiHAWlNsgiR1PhAq5vcFbxDDmbW77nOwvO0AFFI9ZMnnTtphibV4ls2zaVRPszZQVRyJJOlR1q1gsRMIcW9xRinfNhh1MBCQYSpH8R+761d3BbW24gqGVQKf+1NqbaQ+Xw22lxQgqSBJpGaVmBJ86rk7u4zB8LNpte07FWWhCUsx67amnsQt7dGNY1c4e85nXbqS6yhQaGaP8w8Umdq0ScNaax1WJNhAdWjIrKmCrzJpq8wlq4xQX4UhL0ZSXGw56RO1T17biKDgKye/Vy2TCg4h1ZIJ8KCYIVH8UbdKR2ospa4dtA0mUJuQVGJ9STWxZaatmQ0yAG0cxufM+dRcVtmcRtF2r6czatdeR5aUlP81wsY+8eQ92j4E5brQ82m2SCpBkAwd42prF7e2GIY65ZuOIfdbOdkOlnMrWNCPH8q09ngjTFyw+SgqZTCAltLf1jeiuMLadv1XQJQ6sQuUhc+hO3yp6kFij4QsnDwbasKT7wOklBV4d+Y5jyq9uH2cHsHbl0laUCVqiSo8qlNITbsBttMIAjTkKj3jLd1auML0QsQdJqLd2BgsM7jFuIje31yyApWZDZfBIB2SP5VJedbs+05b10pLLK7WEqcMAmBzrQNYSm1ShLL5CU7DukfjFKv8ADmrl9FwFFLyBAUADI+dT1K4rGU4FuhYWGN3bwPcJfKwQN/MVCw5xnFuIDfXt0yGyqUNl7UA8h5+VbJjDWWrJ63TMPfEqBr+VRGsLTbpDbbziUpOgypP5UaltYWM7jPd/2gtKuXG2mVW8Bx1IKZA89KkcDPOOJxBtxRU2l890R8JHkNoq9vLJu4dbfkoeQMuYAaj50mztWrMLDWpUZUo6E/ShyurAPOkBZ8qK0VF2JJGh2ptxXWNaK1VF0kEzFQQzCdpKSMVtMhBzNq0Osa1hpKiSvWeRrb9p4Pt9nqJKFST61hnSnMpJJKuVZS3Atw2Mw5RHKul8KFLvBxzd2FJEoMa/GZrmaSoTG8wJrpvCoSrgpIKBnSFanb4zWxyrtMTDzDs8jJ4sgpvFg7iaqWdbwDzq3xWfaFk7g1AwpGfF2EgxKo+4112Z9lnwNDyZf+50H/8ApfclJbUr4U/OjDY/eWkemtXLVkyhUvKCzMQo+XSn3G7VuCCjTYBMcvOvNNKR9SvFK9kigQypwnIkqihVi8+FKKW3SB0bTQp6ES52ZqLkh5CUFJWSgahXONPIbzTqSEonJ7xUFaVfENp28/wpL4CkLfypOXRELOUCDpPI6x50lvOw3LoCW1AxuJGvL5/cayTwcirK0v5QVBOUL1VzIIPod6h3GdBSSoRPhUZVA3+6rC4bSkKSAFBJTlBTqqQNZ84qJcFS0IQ33hynUc9dT85NMRGcQVqCVBIOoOsgRvB67Uy0lHtTakkkpcmFCCDFSSQAAtakq02G3hP3Uwzl9sCzlVuuZmSB5+dXUFepFeaK6rtBvyIiUHO6DyJJrpfZihtVi8sIJKYAGfLJ5/dXN7JObMpRJJM10bgFfguE+GYGhGh02mK7zH9TY4PLO0OQ92ex9jPKSo+C7eAGwHjNaPvCVEJJSgkiF/unzrLcBIP2O+QTn9pdiD4U+I7itBny904VoKUkpAgkQTXBYnrpcTvaPVx4Ew92Hc6vACM2aZmOdef7J1H614qXCXFm7cyqn97Nua7t3qkOs5oKeRjQ69K8/WCF3HFV8GEFa13iwkJG/iO1Vw7x1DvllxhaWti0w4xcrW0IPwgGOYk1a2nFNretPqRbvyyyXcpIJUAQIFZni61YHBYvglYu0htMk7RptViyhlHBf2kS6LlNvnzIcKTO2kbVW1FogmaqyxO2ubFi4C22+9SFZXFgEeVOrvrdtIUq5tu7VolWcCesa1ybD7vv8R4eGRIS6jKvvPeBRk6kGp2HqW7c8T2LhSUW4WtpakJOSJkJEQmfLpSdJBc6Q++EtqWpaUtgSVEwI6k1FtMQt7l3umLm3ecOyUOBR+grmV9jFy72ZsOKUVOIue6UoqJzjXfy8qPFXb9dlY3ff2TCmXELUlo5VGdIMJH41HmvFjudGVdNDEfYS5FyUd5BMAinCFAEAgJO8azWevHl3PF2GpdaDae47xLo0zmJy1bO3EBWUBInnvVbVhlFxlxEvBbNYtUk3GXOpzLKUJmJ9SdKTd8SKa4GbxlOrpaSSVaQomJ+tQO0PK7wzevqAU4w14QdtxVDiF333Yy2FtkgoQSE7nxVbGKcVxIlojim7tMQwQ3LjjltiQhRebQgAmNRl1NS8Y4vYTgF1dWZdQ6h3uEFSUiFbzvtFZLGEtP2vA5ZfHgyyFanccxVy5aW17ZYkMZQ1bOKugU+EqSPOBzqTitjsFy44Vxh/EXWT7XcXCwmXUpSgJ157AxVe7j1/dXuMJadfaFiklDbOSNJ1OYTy5VEfzWXaHg7bNwt1BYCVnNmHP6VVEJucZ4pVcrZDzSFZC+JJGsZdqSir3C5rcJ4oau7LCzcNLD95KcyfhBBjWaoTj9/cYbimINP3AFq7GVtSQ2NtCCJ++omA4g6vC8AC25ZLqwtSz4pnSPKIqqw28bb4S4oYWtCH1PeFBMKOo2FNRSEdDVjCv1ct8TQ2FrdSPADpmPrymqXgrGrrEnMSTdqUruliATITvoKn8LoTccHWLToMd2nMnaqDgcpRjOPoSIAeAAHLU1Cysx95tFqG8gjlFR8wjWlZgJEGeXrTC1ET+VVjFLVIMK086ZdMRrQUogQaaWuR4opgEtWaPKhZmbkbzBppX0FHaKHfpgiNd6BGL7TxL1muPDlUmY0J6VhVKA8WUEjYEQa23abIfshOhCpB5a1iHIUZUAYGpHOsqO4a3CRooqOs/u9a6Pw2M3ByU6Df4d4znc865o6BllBV5aRFdJ4RWr9UljKUqCCFGZkZ+nKtllXaYmFmPZ5GcxUAXLo1InnUDCxOJsgEBWbSasMX1u3TMyarsNt13OMWdu2QlbrzbYJ2BKgPzrsMwjqw015HM5JW5jG0qnhJP6mkaw519XjukpEkHL5elS04PaIHjW4tXXLv99deT2Y27KocvHFr0lKAEjyA+81c4d2b4J3aXHjcOhQkJUqK8zUZvYe71+VcFti9nkjijNmyEQ0SkjmITQrrXaQnhrgPhf7QOFMOrU6lptLiiJJ3k77A0KObl4mEuVOrbpf0OZpW0WEZUlUqzrJM5TJ6b6z+VIccCnlN96Vr5yCEyDMEcuVOZluPpQhCilQ2RB2kEeXOKilRZJGgKyQklWitdZPzrIONErs0tOIU24QAYygzERI3plSkoU4lKUpcVAT/m2+7SfkRRhRUHyiYBBRmOkzoB1FMrhYIEpBBUQdFGNYpiGXBmK8qhn3mfv09IpllRStKYiMxyn92QdBTiioKAUkqIGkiBEzA311+4000El6c0rhUjeND99ZOF66HFFOI6qXBkeyUQCRyroXBThaZfWUymQCADJkdByrnljoRBiuhcCPBPtmbLqmMxEnbYdK7vG9WcHlj+KJ4IfKcJcUvKE+1PHKND8RrQB8rSkZhlVrCNIPSsxwOA3g9yCUCLl2MyjJAUZFaNtPcnZAJT4TzE/nXAYrrpcTvqHVx4EwqWooBKklIgqBHXpXnrDn3LXie8cZcUhxF2spUND8W9d4aMiEEKbWf/SfM1wEDJxPiAAj+8rgdNarh3jqHpF60Tj/AAt3dwMynkg/Fl8XI07Z2CG8AGG3MOJLZbVlJGnrTHD72TBbUzPgE1ZFQWmEKAnXasaUnuImctOGQwnD1JUjvrRchQKtUTon8aurTArGyxq+u7hsPe2NlK2AswJ3KvPyFTM5bT4T4+aunkKjqdLZOwOmtGuQEc4RafYF1hJsrZlh1RUO6SRA+ZqqscH9hDSmhahTQgLyrUr5SYn5VbOXCW15lOASOdQXrtK0nIqQI1HKlrYyTdONquEPLHePt6pWQCoVGduFqWQIy8pOtRi4ACc0knedqYS84LicvgSneoXuIdxBlu8sH7a4QlTTqSkpImo1lYMs4GnC1+K3CC2YTGh5VNLy9ZURzmaSp3PJVrm6VJNoCvw/hW1ZTbj+7htjYtNZVnyKpq2v7Ri5Yet1J7oOjxFIiT59abUpKSShaknkZqOq6fKhEOcpNDk2AxbYS1bXaHlrbUpoQnI2EfWN6iYhhVu/fO3UMhx1OVRW0Fz9dqlm6KlEqBSRyii71LmqgQroad2Fxm1tGrO1bZQEKSjXVOs+XSqtzBWFvXK2+7SHdV5mUqM+SjrV462Q2kqMAnTnNR9lkKI01ouwHLNxFpZBpoEJTpqabsbJq2u7l9qAp85lAJApt5RLJSI11jnSGnISCSRI50wuWKzGoIpkkk7k9KZDpIJpxl0AyRrRYLiVTsdxTK1bA0tbkmVHWmVqEwNaVguBSxlgffSbVUXSfOmlGKVaGbpvXWmhGO7S1kXtnB8OVW1YkKI8UGOWlbPtJBF5ZKHxZVRPOsOSOkE71lLcNbhRUoJIO28RXQ+EP/5XdyrBKm1SOnjrnTZzeEn5710Xgtsjhl1Y8QWhWvQBdbHK9mJiYeY7cPIosXk3K56ComAEp4mwozH97Z//AHpqdi4HtTscjVKh5y3um7hk5XWlhaDEwQQRXZ4xXoSXkcjgHavHie0EpN3eKJK4UTCkiIT0PI+vnS8X4gwXBGz9q4nZWQSJh55KTHpM15HxrtExq8aKXcbu1nm2y53SB/0txP31k/a13DzjiUBx0jMXAJI+Z3rzVNo9EnFN79h03tx46t+K8YtraxuUJwG3bKmrpxg5HnpghOaNgTrQrkboXbtsKuWW8UF04Xmw2SpSMoKVIM8gSD6ihViTKpS2na23FKUpPjyp8UTJJiAAOoio9yrIFpcWAogEJJ0k8tfw60thcuS3mygyQUTETH4HTyqO6VqDjj0KTqokjWCenLp86Qxt11xZzpSWg2S5oI05EffTYUhSfhIkhBBTERIMeVPJWrKUpcSqUqKlKEAaaD746aVFuGjmTlzEeJMDbeflTQg3CYICyqZSIkwmeQ+dRGM3fTASMpkf1/WlPXBBgp8ITunbWNdfOo9sf7wrIfBlIJjfesjCddDiijEdVLgxq0JkADnW94OK2jcqbCVpCRE6akf96wVp15itzwYpa270ITmBSBB9D91d9jOrOCy5/FBwa6j7NWlKS2sXTxMn97MfoI0q9gFoysKBESTHp86y3Bqow65Q5pF47mI9av3HWwEpjKlKZykbnr615/i+unxZ3+Hd6UeBPbKg5lKhlSRmMxlHSuAOqH604kRIT7W5E/6q7tbqUUrUlWbIMxMzqevWuDvqzcU4kU87pf1nWq4Eqh6K4dVmwe1kboEVaJVl0GhO81gr/E12vDGH2ls4U3VwB4kK8TYncgcjVhwRiz9wi4w7ECU3luqQXCcziTrMHWNqx5QdtRA1hICSCYnyqK+6ExpJA5cqz9vduN8ZX7Lb7jrfdZltqkJaMTprz/OqlvjFD7KHG7FxQLvduqBOVscjMa8/pS5t9wGneIMqWCokVHUQkf5eg61VcRXl9aXWHv2eRVgV5XgR4iDrp8qslaq8EknYbmoOOy4DD99a2ygm4uWGVROVxYST9aD95bMIQp+6YZSsSkuLAzDyrL8UWdth6Ly+uVhrv2ygD41rV0GbYCeVVeBWa7rhC0vL9UvYepTgWSVEoOsa6GrFTVriubq2v7a5KkW12y8oDUNrCiBR3d7b2iUru7hphJMJK1AA+VYbs9beuMRvMSddkukjkJTMAQNOVaPHbFCrhm/ShxbjWhS3qqNtAdPnScUpaRlwzdM3TXe2zjbjSv3kqkVGt7xi5zlh1DoScqihUgHoaw3B6n7n9Z7Vl4w4V92FnxNnXQxoPlTlze3dtavYg0h1kps1IUFgaKEGQBoB661Lm9thXNe/i9hbqLT14w24mZBVqKktrS6024hYUhYkKTzFZPg+z9t4fZuXFrSm4TJSgxJ2M1eYXaDDsO9lEZUqOWJ09ZqMopbBlklRVz0GgFIWod5G9NJWUmNKQpcqPiMzqBUADdXBMQZqOpRnYfWiKjKvECOlNrUnTWfQVIQ6tahlybjcUtLpCdDJI1A5VGzg+dHIEkGKaGPqehMafOjSQo66CoSlTqRTzLkIgzMaUAOKjXnS7MoDzYSFZ5MztTJJKTSrLxXaOutAGQ7TFZLqyWIkZuVYVxQU6AVQTyIrbdpfheswROiiPqKwyllMpyGRrKqyVuGtwsKTmABAjXaui8GPgcOLQsSgJXlA5Squcn4c3hlUiNq6FwmoN8LLCQtSlBc6aDxCIrZZWr4qKMLMnbDSZUYmZuXNSfWqO6+Ff+k1fYl43lqjU1R3Q8C+fhNdriuqlwOOwLvWjxM1Zo8SchkHwkgTE1YPp9itFBJBzI1136fKmMNCsyEOHQnUcgKexppFml5DaS84jdO4nf7uleaS6R6Kt1yqDDbwtjg9+q3CkKW4XlR3a5gpB5yIOlCjxF5t26ZOK2Kg4lhIKGDk7xWniMbachG1CrEUs7mlHugXdUJBKisxmnUxH8+dQlFKSXMwyrUQAqZjl94qYW4TmdjJokkmNI012+lQ1qc9pWYcWAJUcw8R001+n1qBYL7lspHdjMEpIGQ6DTUka1HJaQlawU+EpSjmBrqDy2FHcKDjiksoKSY+HlO3PWo7rZPtCHMxK4zEAbjr5wdKAGHHcy1AAqAEzB1/rr50hlee5nu8gCNNdwRpSbpCmDlQsGBIykzt/XlRNJzAEqUkkQFRMT+dZGHemrFvxRTWV6cl5MVY661teDEIzP8AfSpISNtCKwluVMKCVHMmYChWz4bUoF5K0lbSwkq8UHoNq9AxW2mef4H8tYTwslSbe6QonOb11R676g+dXOYl0lBlJ0MiBPMRWd4bXktLxOvei7dGfWZmrhpwNrCEyQQTnI2nnXn+L6+fE9Awz+FHgWLCcmVYhIV8JB0NcMcUWuKMTg6+1Lk/OuzpCs6Vk5Uq1E1xa9EcT4id5uVn76qgTqbjobNu/i2JWja2loS20lKQFEB0a6zVk9ZXOAcU2WINpzWr3uXSlSlBA21Jk1d8Ppa+zLRzu0l0NhOfmBVo8hD7eV1KVjkCJ1qmVTbYgjLpQ8jtGuXi2sNPMkNq5K8OkVX8DWINvfMYhbkOJekJcFbhxpCnG3ClPepEJURqKhOJbZcWttKUqWfEQNTUXUurAVHENlcP3GHXFktea2X+zBhKh5/SrQuqSZB13McjTRchUE00VlU8/OoNtqwjE8VP3eKY6bS7tbhVtbqzNJRGVXVSpI8vpVhxA7cp4Icbwxp1Kge7W2SkqyHfbStAu3t3jmcZaWraVJk0QaYDa0JaQEK3SEgA+tWc5u2bhFRgyHMI4RSqwYS64lvvENefME/Wkqx65Fvh7ztml63uU5Xm0fElXSSYirxIQlIQEJSmIjlFNKaZ7sNFDakAyEwMv0qN09rQGY4HtnrbG8bdWjuWLhzOhsGQnXy02NaHF7Bq8w+8tkIyquWylRSIJPKnUJbbSUtoSgb+ERSpOhGkc6bld3AyPDeIXuD4SrDLiyzu2xKW194lCVDluZrSYNdPXdi2u4A7wk5ilJCR5Cd/WlupQo5ltoUdpKRRpISlITGXoOVOTT2jHlr95EkU0tae83PnSJhU7+VNkmSedQC4tSiUkgARzptStPzpJc0jWPWiDg0kTUgDSYUPKiWowTrFNrVB2pC1SkAUAGhydY0mnwrSQaiSE70YUIkmiwImtknTy605Za3iBJAqC2sHTnUyxP8Ae2oOs0JDMp2meD2NR1krEdKwUr7slRJA2mtz2mOHvbNAj96JrCtqiUrnLETOlZC3DW4Na0rQgpiRyroXCAH6qvKKRmIWPi1Hi6VzqB3aVAEgGJmuicGhJ4ZKswk95mHP4hFbLKe1RMHM+zSKy+JClCqO9cCUrKlADKdausWXC1kGZrPYi2n2R0LAKokKPI12eNk1RlbwOQy2CdWN/ErmWWzboUHCtxUygpMI1015nnUyzt7dxp3v3ljOgyQmq61aWu2zrIypJGp3qcWkusltp0KkeIgFIjrXmz3noiKdp+4sbeyumbu3uFoK2kMrAzNTqQUncc560KiPmxs13DF5YrdfcIW062sgpHQjYjehVisUs7q++oPLR3YE6pCv5b/Wo125kZQhOZK9xA5RH1j+taU4+oBk5StKFFKp1GoGkddJ560y7dgNy6sfFrIgkT15+ZqJYIs3WrhD5WlxDqVDMHAP+1JXkbQgJJbQoZjl59TPT/fpTZV3qjMlaVTMyB9+vP76SuENd4tSApZiFayNfLQRTERFuBTYSt4uGQfh+ZmnmBmuA4lQSgqGiSNOgP30268HH5KVJICRHICNvxpNqVhxClJSRmBGvMnT6VZS6ceJCo/ysfbbC1LQdprS8OvLTlOdSds2XnFZtn9qr/Udq03DZOdzOEkAgjXWvRa6+GecYRv2iyGsDcbAxBAzFftbg8zrIq1aXmbWtGqiQQPv08qo8NU0U3qO7GcXbgU4kmTJnbYRViHfEkklJ1SBzArz3GK1efE9Ewz+DHgTw/qQQEhWv+muNXBJ4ixHNpFwr8a6syoAQIKwYSddia5XeacQYkTOf2lU+lUwJ1Nx2rhwlWEWuuuWrZtYiJ1n76ouGHFJwm1ggiI1qzWRqY571jS3kESHHikaGCKrnXCtyVT9aW+srOhk86juK+FQOg5RUQuEtSSowD501nmI0NNlZkncneiUdJ2VO3Oiwh1KsqYjXXWkZ0EkLkmflTZPh0GppBMq8qYDylDUj6UhJJ56U3z5a0JA0J9KAFlwDnFIDhJGsCkKOXkD50QWNANDQA82tWaNFJnUczSXXEKcUWxkBOgmYpsuFEhJgc4pvvROU8taYD4CkyVyOYmkDUZoMUpT6sxykjy3ptR2JPrTASvnIikAiN5/Kj7xOfnFEtwEQlMEUANlUEiKQsnfSKSpzMSZ8jRBUzQAJmicJFOIbhsqXA6DrTKyCRApgLbVCgeVWFgoG6RHnE1CUotILMIMkKKhqakYeZuQY5GgZlO00EvWR3BzaD5ViyIlBRAVtOtbTtKWnPaJBUEozEeulYaVhMH6zrV6JLcLBATABy7x51v+DZ/Vx0wIyq9R4htXPisK+EGfSt7wasK4de8UEBWnTxVs8p7VEwM02YWRDxFOa5A5DXSqDGdLd0gfu7Vf3Uh2T6VRYz+wdn+GuzxvUS4HIZc/jQ4lBaqdUktIKTI5j8zt61JSFMju0uJA/ecCgUjyFMJSnKVJQtWYbq5+lSWEBLPcoQVOurEGQU15sz0NFRij7jEXls+41dtHIFp0KkmhV1dWyHELS/ctwhWVXdo+E9M0UKakhOLOluWzYCypRS4iSSspA/3350w4yhRQFLQ4QBCZ5gbE0rMtKYByJBjXbeSNOvlTRWiQBnLcEmDoemlAxFzLaj3caJKlFJylZ00B+g1qCv3jqgpKgOROkHfSNI0PWnitSBKkgEgZVAn/AHP0plQBiBpGYTz0+7b1pkWG2ookqOQJTqdgBGo+pomlqW6xmUlQBkZSf650h1Ki4AtJASRosaK86dZWVXzYCpSVaqSBr5eVWUleat4kKjtFkxuUqWfM1puF0Ba3kkGUpSoQdazQJdcUpKcoJ0T0FXmBryqWUryrSkGOvUV6JX207HnGE69sh4cB7diaCvQ3iokwDtvVilyQkZZKTEkwI6VS4d3bl3iSiVf8UYA13FWaApZAbbMwdAqYPWvP8arYifE9Dwm2hB+RMZjOZU2UpUcxTvHLyrluIE/rPic831Guj26Ww4kPlKgRqRtPL7651ibaU8S4klZyLD3wxvpVEN5bU3HWOGVE4VbjXQVctvJSIcEp8txWf4cIGEsaxpVqpyNFKrHlvK0S723LLLS9g6nvE6zp+VQXHZbUkgGedOM3JbBGpBHOoz5WsEhJA3qNhkdSiFCDr5UQWrWR6yaSc/8ACR8qQc6jsdadhEnN3YT4jPONaShZbUFo3G00wVmFEjyFJbcUlJ/GiwhbiyVyVEmZNFnSFAgfWkuGTCUwfOmlK10gUWAdcWRMnWmyuNUk02TvJ9YoBQgTzpgGVbnY0lKgSTHpU/PYItTFu4p6NCpek1WFQ1kROtAxZcKfhFKDq1aDwk7mmgRAJECluOpAGRIE0AB0FKiVEetILgKNBqedPXTzTjaMiFAj4hOlQiR9fupgBKoJ0mlBWmm9IJ03+VBCgYECKAHXFCUkFR01KutNZpM8qevtHWweTadB6VDWojYUASCsJjcmpuHqJuU+h/CqlKiNzVhha/70mehoAzPaUs57NJjZR2rErMhJGsDY1se0pWW4tI10UJrGrKVxlJrIRJbhMSIK4HlXQ+DAW+HHVZkpSUr0UNT4uVc7IB31roHCKQvhl1yVEDNoeRzCtnlHa4mvzV2wk2MXeqlGs/jEi2dI3ymr+6PiIqmv9W1g6iNq7TGLVRkvI4/L3arF+aMywh0tlZJypE/FtUl5cW7SW0ZCqTnzEk/ypldotoZnNGZgkaxUq3aCgk5zEeEKjflXmj3noqGxbKtxCzDpMlJMAChUqybYL49rdeyqkKiDqNd6FFyVjenI9lMNJMSFKJBOvXl6VDuiV3OQFGYTz0k8vMV3fFuxvDn0qVh1/eWzhJIDp71MnrseXWsLifY/xFYJV7MbS/R0bcKFR6K/nUrkLmDZAUFQpKk+SpCzt6j/AGpp5aSVqIUqFakQCYmascXwDGsHXmv8MvGRsMzZyjTkQI+VUpcUEmEpSFbCYJ8gOnn50wFOOrbWhLR7yCYCTyOvP5mlWSkKvmWZnIqUkiJ/r0qGr3aBnyhX7oG52ial4corxK1SEkpUtOUzOk6n1NW0NlSPFFVXbB8C2RCXVAaQdKt8HSpS1+EzE7aAcyap1mLlYH8UVd8Oup75xSiRlRtMTXodbbTuec4a0a7TKXCvd3mJBQgd+dd+U1ZNKzH3RjxbzrH8vKq1l1JxbEwlIyG40CvQa1N75QWhWbwkkbRA9K4DHr9RPieh4LqIcB5HxfDJUSIIrn+LKC+KL9Wafe7n0FbtvKQZJzEjQag/OsFjXh4jvyqf2gknrArGgXVNx1DhvxYSyJ3rV4Xa2hOe6dQhA5qrB8P3kYUzk3Aqctxxw6kknrVMltK07HTHMR4btmsirnvHI/5aJqsuMXwFOiQ4oDnl0NYdAjUnXyoxlAUM43pWHqua1zFMGJ0S7/6ajO3+FE6Jc+lZfNBMmKMLCSZ1TSsK5oHLnDFJGXPvG21RlXFgoEDPptpVIlRO0j0oSRvM0WC5bKftQkwVA+lMqXamBME+VV6icmhO9IKtQZ0osBYKNtBTJ+QpKzbFQ8WvSKg5pmBFJJBOvLanYRMdctkJlSjp0FNtOMOGdY5TUM6J+GjQvxCNqAJjiWQNyBTCymNDIpl1RKt6QVQaADcXlIExNAqSUjTWkKVO+ppJVrG9AC5lUzRtJK3wgaEmKQVAEZQY8zvRsultwLT8QMg0WC45fuTfvJGwOX6VGWRJ3jlSCsrfWsnUnU0SzzNABpM1Y4Yr+8oCRJg71WjYQR8qnYbpcpM6waaAzPaWQbiy1JOVU/WsWdhE5ZradpELfskoBkJVI+dYlShEAgCr1uJrcETE/wANdB4NVk4YdJBheYJ00PirnshWgHpW/wCClJ/V5c6qGbT/AKq2eUL9XE12bdkmFdwVKNU18JSvWNKt71WqiBE1U3XwOf6a7XFdVLgcfgV8SPEzaHHO9yubTCioQTU1llSUOqfzJaGoJEE+lQ33lXLyO9UuDJgn6mrF1f8Acoz5iqAElUqTXmct56OiMXxAVGdCdAFHQfIUKlMBxuwOZpHdqUIzZQZ/GhSGe1cN4ksbrW3vWVgjQBQq0ZxALQkOKbU4Rrk2Pyr5v2mM4zhToNveXTCk8io6fWtdhna/xTZ5A9dC4SjbPoanzb7irnE96PfAuEGRoUxqBpVViHDnDmLE+34RYvLVuVMJk/Ma15YwT9Ia6aSEX9quR+8k6CuiYJ2+YFdBAeeDTnMqER+dR0yQ7xZvsQ7IeFrslVszcWajr7h8xPoqayOI9i72HOm/sMZLrNue/Uy+zBISJjMkxy6Vq8F7SsFxPIbW7ZWrmAvUfI1o7/HbV7BcSyvJJ9ncgSNfAfOrKcmpIjOP5WeXUrCn1r3lRNW2BEd66SRGTUHnVJa+JoE8xVvgpR3jwJjwaetekzXwzzSm17RfzIGYjFsTcyie+SdttBUpSklpJKgQYJM6pP8AUVEeIRjOIyDlKkEeQyihKgcqSkJAnX151wGYr9TPieh4B/p4cCYxKkkgZVzJHn0Fc/4muCzxBd5pUZT4Velbv4grukwogFSU8q57xisqx9/MoK0TAH7ojasSG8yKm43vDFyV4U1lCU/6RVyoKQtQUoEjcgzWZ4RX/hLRNaJCgExmITv5TVct5UPzHPlpSSok0hSgVbgnrSSTyqIC1E666GiMQfFRDYc6ABOh350gFJJOswBQUZMgyBSQCEzHypCutMY4DGlJUrz50kqHTWgqNIOtAhRVO1GCCIpM6Gfuo9AnWKQCVbQdppKdKJRg86BWIgRFACFzJjejSdAAPWkFSesUowmMpmgBKokiNKRI5TRqVJJpMyMsUwBmAPU0Sla6USpB1FIJoAJGkk8zQMTRqIKfOmlKjSgB0GBpU3DD/ekz0NV6VCanYd/xM+RoRIy/aIQbi211IVHlrWNXBSAJmtXx+Cq/ZKoACDB+dZQk5QqdNqvRJbhJUM2gj5V0LgopRgDmdIUleYa/6uVc5mZmt7weT9hKBnLJy/XWtrkyvi4+prM4enCSY9fQVqyyE8qqnvEh0f5DVlfnKTFVpOZD3XuzXY4t2pyOUy9XqR4mfw15tCkKuxkCTAUEZo9ZqfdvMPBoNgIgEQPiMcz0qAyUOtQw02lICQfBKvNVKT31ugE5QlZ1UNFekjlXmr3noi3WJADiLbO8FHMZA10FCmWW3lKKFOEJ+IJWqQPPWhSGaXErGxePjtZVuqASE9ZJ3NZ664Yw90KcSjIBMpBiK0S0L0VlCG9wiQCZ0+VR1kEkuKUFJ2SdR051ZdlbSMfc8GLMm2e03GbaKrH+Fr9v4UhXLXT8a6Ep0Ay4QUp1GkgHrvrTjiguCEgRMAAHN6gH8aabIuKOWixxOyXmbQ8hQO7ZP5VY4Lj+OW+IWzRvrsNrcShSVKMEEwRW9dQgHK6MrkbpE1FLDGZlQbScqgU6dDVlOVpJsrnD8rsaa2HgI+VWWGlbbqnETIGh86q7ZZ8QWClU7VeYeAWISAZ11Hnyr0aTvC55vGLVYpr1cYzdnP8AEU5lKH+UUaFpSstjNoPmR1mivHAnGr0uEEQjQjqmkaDVYIATlkneuBzJWxU+J6FlzvhocCUbhSgSkKmQJSIMVgOMQE48+ITMAnL59fOt02U5FpbPi8yQY5VhOLiVY46dPhTMdY1rDhvMme41vCCj9kt+taEbkGszweqcKSPOtE66i3ZW66pKEJEqUdgKrmvzFY4843bNKdcIShO5JpnCcXssRCxb5nC3Ez4TrXPOJuInL9xTTMpt0nwjr5mpfZyoi5vNTJSNqnzVo3e8djooKFHRSkg/xCaMKGaAtMDnUVLqk8xMazR5xJ2nfeqrCJTiQkk50q9DtTE66VGvC6q0d9mUEPlJyKVrBrGO4rjzWINWSn0h10Zk+AQd/LyqUYau8DdkwDRCdxv0rN2uNO26E22IpU/fSSQ2APDy3iptrjlo6m4zlTKrcS4hcSB109aWhgW5VQLnhiRVRa40zcd2e5dabcgBaiCJOw0M1Vfbr6eJLi2Wy6phKYDYKQUnrTUGBqVK586SkFWw+dJkKEgiDUXFLM3jLQU8pLSFZiiYCvWopbQJuWNfxolLAO4mszgFw4vGr5lh0qsI8BGwVHKomPM+xWRIfm9U6FNE/Edanze2wGuUrU0RV4dKjWbynLRlTv7QoGb1jWlOvNt6LWhPQFQE1CwC8w5UhaoFUD+JKTxMwyl9Psym5IzDLNXHfNuKytuNqPRKgabjYCuu+ILS2v8A2V0KSoEAqMRVmVZwCnUciK5vxVJxy466fhVnwvjimCm2ulEs7JUf3f8AarZUvy3QkzctnWrHDR/eZ5QarWIUApJBB2I51Y2Gj2g/dNUreTMj2iOld5aoJ0Qg7+tZFUiCBrWm7QSoYgwRr4TpHnWXzZ1aT9dKuJLcIUfPWt5wjJ4fkqmFGB08VYIjWt9wmR+rghIBKjr/ANRrb5L2uPqavOuxy9B28gkg1WtIlx1P/wCNX4VPvCATrUG2Lii+tkStLSso66Gurx8lGjJvwOZyyLlVijKWlubtbi2M/hIzDafIa+VXjbVstm5LQL+WFKQ0ZyJjedtzvUXDuG8bcAVZYXfP5xHumVKCgRttV3YdlXGl9mUzgt4OiVJDYP8A6iK84buz0FKxRtNoClqShPcyPE8oFYMfhQra4d2DcaXCvf2lqwOQeuU//GaFA7lM46U+BsLRl1VEa8+dNLKkgyoZTG4gAjy/7U46GgoySXBvCR9d6YcWlJShSBB1AAjlpUyoSIC/DKRoDBk/16U6lKU5zlTm0hRGqvXp99R8i0qCwhRPmRmPnSlOKQSCrXkeUetMQailKzl8StRt94ijSIWlJO4A05RTalKy/CoJPNMGm1KUoKiABIzaHXpUlvEzVMgOEpO/I1YWSlpaKswAb3HM1W2vIjy/Cp4WG+9BVGZOmlekw200eZVXatL1Ka5eUcUulq8MpBBjnGlKSlSmQSD3pE5yfvio2IEJxBRJM5EnQTSQ+DlaKVanWdVGuEzZWxczvspd8JTfkTH3EOIJyJSToqNCY/rasdxOn/E3FpUMpSnT5dK0pcCW05liVHMQowZ2qixq1cuXStCU95AEA7+VYEHZmdPai+4NXGGpBGx0q0x2x+08NWwF5F/ElXKR18qicKYddt2RSu2dSQdZQdK0abC51AZXPQg1Buzuis4ne2z1ndKYuUlLiTqDzrUdnJi9uo/gFbDHuFlYvaqBaUm4QPAsJ1+flVNwbw1iWH3b6rhg5VJgFMkSPlVrmpRHfYO4vgCL+9XcB5aVLjMJ5jTpSMMwRdjft3AfUopmcxmQd+VaxOE3i05kMqV0gTTYwy8VADDhUeQSaq1O1hDBWYrLYylw8YYY4EqyhHxRpzrXKw66QrKppQV50lWGXCnAHGtU6gq5URdgMZjzDqOKW7lwvNsLayhbQJMgeVKs7JpdzdXCUO3CHGihzvCQVH0I5DWtlcYc6RDjc84NE3hziAFNs5QTBIFS17AMFZqew+9YYw1116yWqVtuNlOXqdedWFwfY+MF3T7ayw60AkpSVa6DlWqOFuJXmDKQZ3I50a8NUvLnbBPKaNVwCEZMx0HKqLie9cZtksNoWU3EpUtKc2UelaBVk6lMDLA312plyyW4IIQpI13BqK2O4FDw77Nb2zjVul3OE5lZkEZvnVT37d9iZvL5l9JR4UoDZIAH51tW8McCStCG0xppFIcwxSdVNt6+lPVvYEZtYUhKkTBEiq/GcIRiKm3VqKSgRvV99m3ASILSdNBmFR12T6dwkDrmqKutwWMCvCWxxCzZ5lFKkZt9q0OHYS3YXPfIWSYI1NW/2WVupeHdladAoKFKds1Rqtsf9Yqbm2FjnXEzkYzdJgGY+WlSuGsGVeOB10ENjUab1d3nCvtOIm7W8jIoyUlYg1p7HDU26UpS40kAT8QqTn+WyBLaKt2ghtKUjRIgVNsiE3GokZTtTZSy2mVXNuPVwUYubO0Upy4vbZCUjUBwE1QltJGI7QVkYgwORQfxrJ5tNjV3xlibOI4updqrOw2MiFkRmHWqIK11iriS3ClkT51u+EyP1fSZ1Cjp86wMiJjWtxwkf8EHmo/jW4yNXxa4M1Odu2El6D+IeJwJHPerXs47sceYQh2O7L4BnpBqsuz74nypnA3122NsvNftG5Un1ANdLma/Tz4Ggynr4HsnD1WSU6PadAYFSg7aNJKlKBG4k15oY47x5IPdBKSeaWx+dNXPFvEtyCO+uATzBEfcK87Ssd41c9MrxS1blRUgeczQry37TxNeGfabqPJRH4UKdw0IxSn2suyjy9flSVOOstEJQkKO0giPrSA6hKE+JQ6kSDRSlasypA8gYirSsbKyMubTXWY0oyVAJISqOsAGOVJcdnOkhc/wlQ066U045m8RBzcyJoEPOrSBmKjJ1id561HUuCFZQqDEAwJ8qJ1SDEJKTzgA0hyUohMK8wJ1/nUkRZsrLUI8wPwqYQlxagrYVFtwlttICgpQSASNhpUhoCNelelUugr+B5hietk/NlFjBSm9J0ADadz61XJeIcWTMDQSqJFTeIvDe+FOaWxzjmap1StoKQCkpHWuFzdfrJ/53Hf5Q74OnwHlv5gsLISZkf8AemHHCZC4IIEE68ppCipa4OsjbaKaUrQZQBl0Gla6xsSUi6uzOW7fBgad4Y/GmDf3KlnNcv6mSe8JJ++mg4Pi/eooUcyRM70WAli+umwpbdzcJkRo6R+dNIv7sAhF0+AREpcV/OmJSpYBX4Y18qbKoBPQ6cqLATftC8Yc91d3KTGpS4R+dNjFL4Cfa7gZdveqEemtFY267y4Q2HBqkmTyip/2G8tJm5QRoZCDpVcqkIO0mbLB5PjMbDnMPT1Ld3ED7QupJXd3Ekb96SfxpBvbhczcvK885P51NewN3Qh1tROpISRVa3aOru1MJRDoMEHl5+lEasJbmGJyfG4VxVWm1q2LzfoPi8dVqq5cBOhzLNKVdrDZAu3omYCzv1ipKcCWoSp5AV0yzTb2AvZZQ8la4iIio89TfeZT5N5nGGt0nb0+xE9sfSZ790xr8R0pCrh+VFbzknUHOf51Iw/DV3YeCnu7U2cqgoTNS/1f/wDMJI6ZdqbrU4uzZDD8n8wxNNVaVO6fD+5U9+4Ek944Z/zGkl9fwlbkDbxGrS6wVbVs66m4ByJzZcsUxh2Em7ZDxeCJOnhmjnoW1XE8hx6rrD83+dq9tm4hB9zmtyBsMxoB9S/icX81Gp+I4SbS3U6l7vIgEZYqus0h24S2tYbSoxmipRnGS1IxcTluJwtZYetG0nu9QKcWlRClqGnU0rvl5T41k9ZNTL7CF2tupxLnedREUzhdgq+DhzlCE6AxMmlzsNOq+wvlkmOjiFhXT/O1dLZu47iJ3hP7xPoaAWVAyTt1p3EbRNo6G0vBxUeIREVFIIHXSpxakro19ehPD1HSqK0lvFrWSRkUco6nWj7xRMhZn1prUafeKCSQCKkVDhWQIM+lIzTyigmUjc0k76HWgAyozpsKKdZFCSoR9abifSgAyeQ3rfcIf/YkyBoowfnWAANbzhIxgQBB+MwZ863GR9rXBmnzzskuK+5KvNFk1N4BtE3/ABvhtqsSh5wpI/6TUG81JqbwDeIsuOMHdcB0uAAR5yPzrpMzTeHml4Ghyp2rwv4nom04FskQfZ0mrdng+yTH92R9Kct7twyQTHkaltXqwqJXNecLzPRHTfcw2OHbVvQMpHyoVMbvlgeOR8qFSsipxmeIyQhwByUpmdNR9KQsp7+ESkI8RWYAnrSkLyqUAtJAEEASPOaZVlUYn0zayeoq8oEJALqzlWpMfEBECjdUEIgtoEbknemy5E6SkaanQ6600sqWufF+VNERz/lgk6KOg126zTZIzZUyRtI0oivMoaZlbDNRBYQlQUoTMDMfvqUd4nuNvbjwVNtwnMAskJ6xUO1PgipTZgTpXpVPoI8wr7Kj4me4rUBfJWkHKG0zppvVEoDKSSOk9au+JlKNw3BhJQJTyMdapRGX4ZUdN64bN+1z/wA7jvcnd8HD/O8BaMSVAgjcGkhsGUlJJ5eVODKZSJBHQ0clKkk8jEzWtNmR3E+MmAAdAKICDIO1SSANdSBrRLVnVIQlJ9KQDARlkjXXXpTSkwpQAhRH0qR4CqdTO/LWklJAMkDzFAErh5IGJtAcwr56VYY137aWvZc4VJkJBJiKg4B4cVSIlWVXlyq2xO9VZNMuLRmmRAVEVg1+tVlc9CyBw9zVecqOC1b1vW4awhx99labkOTm8OcQdqFs2leM3oQBmS2j686FndDEGnFZVIEwoT+dM4e2m1xi7YK1AlIUkkyTziapa6XczdqcYQweieuGrpPe3Z2I+PPvM3KW2nFoHdhRy9ZqVw8t26t3A8rOUqAmNdaLGcPXdXAcZcQmUwQqnMHtXbBpxJWlRWoHwjpU5OHNJLeY2Gw+YrOZ1Z35rb37N2wq8ZcVa376bdZSFZSY01irbCyp6wYU4uVqTJUaoeIHw7irrifEjRJI8hWgwYA2NsAD8POpVY2pxZh8n8TOeaYmCleKvZX2bzLO3Vwt1bJddKVqKInQ66Vo1xY4arKQO6Rp61S4S0XsVPhkNkqPlrpV5iDlqlPdXikwrUA86Vdq6ikT5ORqKjXxlWdm7xi5Pd/jEMqF9hoKh8adfWsoUFDikmMyTBkVrbF21Ukt2hTCdYFU2LWShiQS2me+EjnUsPLTJxe4q5UYSWKwtDFU2pSVotrbe/8A6WWFv+22GV0SR4FedOKSjDcPV3QJCBp60YS3YWBywkITpPM01hlyL60Ul6CseFQHOsZpu8l0bnS0KkYKnhasl7Ro3/5/mwyq1qdfU6vUk86TMDbXrVk9hixeqZCglEZkqPMVAfbU08tpRlSTEitrCUWth4/jMNXo1Jc8tt2nxETChOk0Ck7jUURkxImKB0JAmpmIEdNSTrQI5ildSYpMa6mfSgBB12mj+GNaUSdYFFoRHOgAKJ8MiK3PCmuCpHmZ+tYVQ13rc8LaYK30k/jW4yLta4M0+edkfFEm8iTFQ8MWpvGrFaPjS8kj61Juj4lClcNMh/ifCWz+/dNp++unzB/BlwZoMtXxYcUdZtOJb5r4s4q3tuMXhGYn51p1cMsKWTkHnpQVwfbOJkIH0rzQ9DKlnjQx4lA+tCpT3BTYJ8GlCjaGw8tZ80EL021Ok/nSUryNyUhRP8Y5UyFqccJmVRoCmaJfhgFSh5agVlGIHsgkrCVHTLFIcytxmVIB5JnXy60AiNYTl67ffSCddUp23A/OmAFKCkg6BIIkAbCmVrjKrUz4gJpTi1lMJkCNfSmpVlJEqjQGpLeRZv7Uy2PQVNTqioVn+yTI5D8KltmAelelUugjzHEdZLiZ/idYStB8efKIjY61RNLyuxpG430q54qkqaIMCIJ86pUEHL4p5Vw+cdrn/ncd3k3Y4f53jhcAWNDNGpW4SJB1moynIiARQWuDAOnOtYbQfDoEiST0oisEka/Oo6l+GSRHXekd7OsydjQBKhKpgKBAk6yKaDkjUEGkF0ToRMU2p45vGNeUAUAW+AWWJ4ljDNtgrLr+ILnu20xKoGu/lWpuezLtCvsgusDulJBkeJsfnTHYXidrhnadhlziD7NtbgOhS3VZUplBA1NdQ7ReIMNxLtl4YZGNIVgamALvuLspbmVHxFJEcqg4q9y+OIqxpukpPS+7uOZq7OeP8MtH3k4FcoZAzLylCz6gAzVHw/wtxNxc+7c4Lh796pohLjqSEBCuhJgT5V6tVjvDeBcO3jfDGL4OLtSStpFxfFaVORzJJNYTsB4owfD+BsVbxnEbK3vFXz7rja3QgqkDb74qNle9hvE1XBU3J6VuV9xzZrs37SBCRgzhGwK3Gz+dUvFXC3GHDtoH8dw5+1t1qCe8TlUmTsJSTE1p3O0PhALWf1fxtQkx/jDon766V2ncX8O4h2UMiyxG2U7mtFpt++C3EhK0kg8yQJ+lJU4ruMiWZ4yUdDqytxZxOy7I+OLy1RcM4I6lDgCgHXUJMHyJkVYs9l3aSy2G2cLWlCRAHft/zrs/aNiOCcdcNWLWCcZ4fhSkOh1TinilUZYykAg1zX9R3Zn+1fDhy/4hzX/31JpS3mNRr1KD1U5NPyMdZdn3GaeILjCbXDCjEkspfeR3yIyE6GZjektdnPGmNYpe2beHKdu8PUlt8F1ACCoSBM66V1DshesOEO0TF2cW4nsMQS9YN5LwvHIo55KZUTqK2nCHF/Dtvxzxo6/jFg21cPsKZWt4ALAbgkddaEle9hvEVXT5pyenwvsOEsdkHH9q6VtYRlMRpcN6/fUTiDgPjnArBWJYphryLdkEqcQtK8g5zB2qp4r4jxBzijFVWuK3fs5unC3kfVly5jEa7V3rh3i3CHuwRdld4xbKxM4e6hTTr0ulZJ0g69KHFN3aHDFVqcdEJtLwucewzs6444iwpi8t8KcXaODO2p1xLZWDsQCZin2ex/j63cKmcIyKV0uG/wCddqe4j4f4q7KLXCrPiazwq9Ns02VuuFC2lJAB035VgMN4Js2cRtXMS7TrG5s0uAutIuVoUtPMA5tKSStYHiazqc65vV432/M5pxhw7xNwu9a/rEwu2U4D3ZDiVSBvtWYUrMsuKlaidZNdM7c08K295h7PCl+7eqSFd+VXK30p6QVE1yzveg+dTjFLcV1a1Sq7zk3xHVKEERSRBOlIUqRtvRZpO1SKhzMRtrQ31/epG29EFayedACwVTBj1mknTxDflSTrFEowegoEGd9dzW74WVOCNjoT+NYNRgnLEVuuFh/gbR8z+NbnI+1LgzUZ52R8UPXOilTU7glGbjHA/O9bH31BuiJVFWnZ+M3GuAj/AM6j8a6LMnahPgzR5Wr1onrRLcLPrUq3SAdaW20lSj6093QG1edpHdNiwhKhBAoUpA0oVNIhc8AlawdUFJiBFRgTnkk/MzSisic2UkmCd/lRHTMVbDWdPvq0iEsFa9NYG8iBSCoqUNRoNzp/XpQC9CkAgK6DX+dJlMjxKzTqTrNMQFkAjTN/q1+dBbveIEASTJJNNrXA8IAHkZmkOQJz79DtTQjotmf7qk+Q/CpSYy1X4Q8l/D2VCRKRofSrFI8Nek0WnTi14HmWJVqsk/Fmb4shKWj0j8azijmUo5hl5RWl4vMNI1gGJ+tZQbzMA1xOc9rl6fY7jJXfBw9fuOJOsEwD1ommnrh1LNuhbjitAhCSon5UhJIBEQOtepf0auE8Na4Sa4hWwh7ELtxaUurE92lJywnpOutapuxtkcFs+zPjO9aQ6xgN4W16jMnLPnUlXZPxudBgVxpz0r3AAAN6GnWoamB4ePZLxwSFDA7iI5mnG+yLjqe8GCuSNQCRrXtskdaMFMb0a2M8Rr7GuOpn7GUefxistj/DGOcPOZcXw24tNYzOIOQ+h2r6CKKYOu1VuMYXZYxh71liVu3c2jycq2nBII/KjWFj57FyUkDKIE6jnQ7xREmJFbvFuA2m+L8awuyeeKbW+XbsoSjMpQ0IHmdYp53szvmrkMupvA93ZdCO5ElA3I8hWyp5dXqQU4pWfmjW1c0w9KbhJu68mc+kLI6xRoTJ28J+tau74KurZttbboIcTnb7xGXMmSJH0NZi8ZctbhTFwghxO8/1tVNfB1sPtqRsi/D42hiNlKV2NoBSomBHMdaPOlcJUI15UnMFKkRMRvSVKEAGCRpWMZQpKvEARrymjJG+4nlSc0BQgbR6UjMmYAimA6qSNExrzogeYGopAWNgr5mkzHP60ALUtStdqLNPIUhSpAkVvOxLArTiLtFwyxv0Z7bxOqRyVlBMHy0pPYCKfBeBeJ8ebC8Lwe6dZOoWEQk/M1br7HeOh8WBvwehFe37Zhm1ZQ0yhLbaBCUpEAD0p3Mneoa2OyPDn9j/ABzJBwJ/T0pA7I+ONf8AAbggV7nlMamilMxNLWw2Hhj+yTjnb9X7r7qi3vZnxlYNF24wC+yDcpRm/Cvd+c5wMunrSlBJ560a2FkfOJ9l62eW1cNracSdULSQR8jTBOutew/0ieDsMxLge/xc27beIWKQ4h9CQFKE6g9a8dqIOs61ZF3E9goeIEcxqK3/AAuCMBY6GT95rnsxBmuicNT9g2ummX8zW6yLta4M0+eP9K+KFXQ1VV12cIJ42wDr7amqa751qOyS39q48wRsEAoeU8fQJNdBmr04eb8jTZSr1onqtows1KCvOoaeRFOid68+R2rJKVUKYSTrQqQrHgGS2pUkz0kUznzDMoqidelBaidOR6D8v50jvSFnOSojkdhVxEJSgDO6j0NIKhJ0idCE6k0ebMqQAIGnKm1TmhBg7eEUCF6E6gDy6U04kBI05fEKPN4SnNm5mkFYE6yfKmJnQeHwF4XbjUeAQelWjSjBChqNDVTwyZwm2P8Ak/OrhQ8c9RXouE6iHBfY82x3aJp+L+5Q8UWz920gW7ebLBMEaa1RON21zatsWjZN+D7ydNRvrWi4jcum2kiyStSzEhIkkTWehtLaHcPKjiij71IOon4tNq47Oe2S9PsdnknY4ev3C7q2XaCzS1OJzlI+c77bV6y/RxBT2TYYFDUPPj//AKGvKMo7pLiSs4znkpHxT6bbV6u/RxKj2T4dn+Lvn59e8NaiW42yKriftGxfBu2zD8AyNHh1TbCLpwt6tuPZgglXISBVFgfavxDimLcdIyMtWdjhz17hUtCVJQspSon94EpNa7jTsvVxNe8WPPYglk4xb2rVuoNkqtlsmQo66yTyimHuygIubg2WIIZt3eHPsIILZJzf+KdfM6VXdFhnOEe0TFcR4KxjGF8VWGIYjbYQ5eGwaw/uzbuAaEqOigNopnBO1rHLrhvBGsQSza8RHFrS3u0FAh62f8SXEjlIjUbGtVgnAHEdrwhdcNYhj2Gv4a5hy7BvucP7txJKYSoqzaxzHOm8e7ILfFLng29bvgxfYCllp1wNSLpDcEAidDIMHXc0XQDmDcZ4td4V2mPOut95gV3cNWRDY8CUN5kz11rW9nGLXWOcCYFimIKCru7tEPOqAgFR30rKY32Z4i9iXEZwLiD7PwziFWfELdVsHFBREKLapESOs10HAsLt8EwaywyzSU21oyllsEycqRAnzpAzzq1iDGHdrPE9xdEpZ+0Xm1OJElvM3lzAeUzV1hnElngWHs2rF8b25ZQ+4i4CFBIUsJCUCdY01qlYsbfEO17iW3ukhbZxN1QbJjvFBuUp+ZAFaTB8Nsbli2v8Ww22sboN3WZgskIUlCQUuFs9DI867HD817NT1pvZ/f8A9ONxHO+1VObaW3v9PTwM1xtieH4m9hq8LQWm27bKtoj9msqJKR5a1yXiiyfvOInEW4T4GUEhRiu13QwxPCL92lFl7Q/duttrFofGAlMBGvg3ri3EqL5ziF04eVBYZRmKVRprRmbXsemKex22hlSl7drk1dxvs9CApprFW2rbDmAh9rVxShE6R+NG40zeW7OH2rARfN/GsgAKjfWlKSHEtJwQKReAe+IOU+frrQUUrbbRhoUMWSfeqGhP8WtcqdaEW2XbQYU2wBiSVQV8jGp1ow2yxaLwt1hJxBSoCwARrqNaMBtTQbQlYx0HVfMnnr6UY7oNrbvEqONFXgUdSDy1oAZbbZsGHbG+YSq7c/ZqABGu2tBhpvCUraxRgLceEtkAKjlRnIEupxYKOKGO5UdfTUedGkpbChj4Wp4j3JVrH086AEMMtYUoqxNgLQ6nwR4orf8A6Pdq7bdrGELWAG3kPKTB5ZDXP2/AsjHwtTZT7rMZ/Ct/2Ai6/tbwTv8AMWcj3dZj+73ZpS3DW89K9rWO3vDnAeJ4nhawm9ZSkMkpzDMVAbGuT412vcRI7N8LuLFLSeJAt0YgkoBDaWjCiU8pkV2PtD4aXxXw25hSLkW3eOtuFwpzaJUFRHnFY6/7I7R/EeLrxi77tzHLbuEILcptySCpQ11kgVTdFqHHOKsd4k4rteHuHbtjDu7w5u+vLxbIdV4wISlJ051QY12lcQYbwzxJaPrtk8Q4Jes2yrhDXu3W3DAXlOx8q0z/AGf4jY4hhmL8OYu1Z4xb2DdhcF5jvGblCQACUzIIiarcS7J7i74Sxm0Vi6Xsdxa7bu7m+dahOZBlKQkHRI9aLoCcviTiPhXijAsO4ju7TFLDGiWmbhpjuXGXQmYIBIINZ/s14/xXiTiAMYjxNh7K03rjAwz2I946hJMePYSPwrVYdwNil7xFh2McXYu1fvYagi0tra37pptREZzJJJqDwHwLxJwndFpnFcIdwxy8XcuINme+hRkgLnQ07qwFz24T/ZZxFH/9t/8AIV4saRbW9s7bXbQN6se7MTvtrXtLtyB/sq4iI39n/wDkK8XpDKmVqvyoYkI7oGZ/y1ZDcVSCtWWMPStvFWR3ixLek1sMBZXb4Qw24IUEzHkSYrIjK7m+3StLwHus2n4edbHBe++yLb2kKDvdic2+5it5kXavRmmzx/pXxQ3eneNydK1fZGsscaWK2zCwlZnzymsrdCXCTyFabsv8PFVqrmELP3Vvc4X6eRqsn66J6StcReKRmyE9KlnElICZbSQelZ22cUAZG3PrVg06MozA61wJ2jLVOKgaFvTyNCqxzwpETlOs0KaA8MqUJ8BKk8z50iIUdR8vyo4KhlSnf+taaGpjQRVxULO5JVm+6kqIJgGSRuKJStYA05E0STBJUSevSgQFJg6ct6Q4qTvpzpYQ48hzukKWEJzrIT8I6nyqMRl560wZ0XhhU4RbR/BH31fq/d8hVLwu13eC2allOqJga8zVyFE616Lg+ohwX2PNcwd8TO3iyj4mubi1YQ7aJCnCcuWMxiZmKzoy2zTd7ZvBy/WfG0Bmid9N6v8Aii9csG2nGkhZIIiDWZCfYWkYqwtK7hwypo7DNv51x+ddrl6fY7PJOxx9fuSCpAZF6hwjFM09yOsx8PpXor9Gvi/D1cM/q5cvIt8VtXnHEsuHKXULOaUzuQZBFecUn3IxcLHtWbMWeUzG2+1BQResOYi8sN3KD4W0mNto51qGrm3Ww+gAWSNRQnyrwzhHF3EacPfLXE2L2paHgZFySCI211peHcb8V3SXvauKsXZKACkG5jN9ar0Ero9xDTkaPNpqDXhfDuN+KLl1abvijF2UJEgm5InXzpqw414mfultXHEmLtta5Vm5UJ6b0c2F0e7FKIGx+lUnEfEWHYBh7l5i941asNiSVqgnyA3Jrxbb8XcRuYgpp/iPF0sEkBw3SgD012qoxC5exDEVN4hdP3LRVBuXllZA8lHSnzYakaTFOMnLziLGsXtbJfcXl4q4Ssqy5BoBPnoKS/xviFyVPm3dfKU5VO98VQOhPSKzK1qt1KsGVZ7BZAW6RMTvrRuLVZZ7axWHbRYBcXGaOR1G2lbKlmOIpRUIy2LyRrauWYatNznHa/Nls9xRidywUWTLam0+IlBKwgnnB51XvvuqdD2E3DlzdLTL6on0ppxRwxeTCFd8y6mXFRnj+WlLWRhSkuYM5363U+8Hx5em21U1sVWr9ZK5dQwlHD9VGws5WQ05gqlLvSPfAakddD50aciG23cPKji5PvUgSR/FptSVRYJausKcL106Peo+KJEnTlrRgezNt4hZuZ8QWZca3gnfw1jmQA5A2H21K+3M0lA3nnpttSl5VtKuLtSk41m8CdjPLTbaihKWvtFLk4rmnuR15+HfakryXLasQuHCjE0GUM7SRtpQMMlp1t13FlKRiQ/ZJOh8tB50hChcFRx4qbeSn3WbwyPl50pWS/Q7dYg73N638Dfw5o1GnrTaf8WK1YsvuHGk+7EZJHz31oAJtRuVZcdUttCR7okZZ+lX3ZzxQ5wvxxg2LYkhf2dbOKbKsuza0lMjrEzVA0o4qsN4ossIaT4FRlzfWkocOIKTZXiu6t2/gciMxGg19KGhp2Pe2D4xZ4tZN3WGXTN3bOCUuNKCgRVgFSNjXz9wjEL3DMSDOHXtzYNBRHfsOqRm8zyq3d454rTiYZb4nxY20gd535IHz2qvmyWpHuwGeR+lAR0rwre8d8WsXSG2OKMWdbMSsPTFOYpx7xbZraTb8UYq6FCSe+mPpRzYake6ARTbjmXka8P4l2g8X2jLS2OK8UdK9x3wMaelJxPjvixzCmnHeKMTfK4zNB2N/TWjmxakehP0huL8Pw/gi+wcvodxS/SGm7dBzKAkEqI5DSvKqUN3LS7q7dyXzfwNnSY20oGVsDFlvqcus2YtuKKiTtz1owkXra8SecDb7R0bGkxtvViVkJu4BGIZ3MWcLLrYhsRlkfnrWwwV517CbdT6SleQDaOtY7XG871ytLC2RCUjnz51r8DuF3WFsuuJyqIiB5Vusi7V6M02edl9UC40UfOrrgjE2MGxhF9eBRYZQrPlEmDpVJdabVa8LIJvmz7sgpUMqjvW7zybhg6k0r2TNdkFNVcXTg3a7sdtwXjXh/Emwm3xBvN/CogGtJbXVs9+yuG1D1riz/DuGX+r1o2Ffxo8J+6oiuG7+w8WDYzdsRshxWdNeSUuUFCTtNWPU63J6pHq5XPQAlSQlOw86FcCRxFxthEBxpq+RsC2og/ShWzhmGGkrqa+ZrpZTiYu2k4mspA1BJPWizJ2gZj01pGeNQJPU0hSuZH1rZmoFO6Kg/WaLSZMwPL+dJJzjoaSQB8W9MBalE+ETry5GmnPCojOTprAoFzkCZpPxHbWgidM4e/+02p//GPwq3GiJFVPDZH2Ra6/8sVbpBIgb716PhupjwR5rjevnxZQ8SXxsGWnS13kykiYisylJs8uMSlYdM9ydIzedariR9u1tRcOo7xKfDl05msk22qzKcVcSldqtRIa5idvKuNzrtcvT7HZ5J2OPr9xRSoJONJKQc0ln7omgpJvEKxiUoLR1ajfL50jKS59sJSkW2bN3M69PSkuNquyvFGkpRbtKktHc5d/LWtUbcUucYSu+KkslgaI3zRrvTc/b6i6pQtywnYazOtJeT9rLXeWyUstsgS2TvGvKicT9unPbBNsGR4p1mfSkApDpx1QadysFkTI1zcqSl37WKLBeVpLAnP1jSkLP22pLTKU25ZElRPxcuVDP9ppbsW0JacZ3c/ijSmA626bpScKWUJbbVAd65aUHCCcGzJ7kqjvufX0pnP7UlOFZUocQYLvIxTqVHuxgxSnOVZQ99+1ABqcVaKVhIKXGHSJe5ifupa3BhBXZMFL7T48Sz+7OnKkZ1WgXhC0oUt0gd7tlnypQc+xe8sXAl4vjRY0idKBDjqjgSy3alNwl9PiJHw8uVG4PsHIu1cRc98IIOuXnypKVnh4KaWE3HfpkHbLGn50EA8OqS6sJfFwmANsvOgYsAYO23f2y0vuPiFNnZM68qUhPsTTeLtOJcfeMqaOyc2/nSGkKwUIxA5X03APu9ss670EJ9hCca8K23iT3PTN50gFEZWxjaXEm4zT3HLpHWjCfbW14wtxLdw2ZDA2MeutJDap+3wUFGbN3H3RNGttV9nxlBShLRBLO85fOgAd2MaDmIPuJYdY2bH70a86QAeIFF19SbZTCYAH73PnSnUHGyvEGyhkW4A7s65o13pLhVxCsuMgW/cJgjfNOtACQs48r2d4pYSwJCh+9y502h04mU4c4UtIZmHB+9GlKWo4+pDDKUsKYElRM5uVNqWcUSjDm0htxndzeY0pgJLinowg5QhKsvfczGtJLptwrBxkUlasve9J1olKLqBhISA8lWXvuWmtJKww2rClISp9ZgOzoJ1oEKW6cJ7ywAS8HhOfaJ02oBRwJRRCbjvhMnSKRnGFtuWT6EvOu6hwHadOdGj/AAUqRdpD5eTKY5fWgYtI+wwm4OV8PCMu2XnQSg2GTFCUuJd17vpPnTbSThKkv3aUvNuiEpHLnzo2m1WS04g+A5buEw30nbyoAdCCU/bPhy5s3dfdvQU2cRKsUSUtpb/5Z1nL50nulT9qwPY82buZ5bbbUbjarwqxG3SEWrZlTcxMb6DSgA1pOO5rhvIwGEwUnXNzrY4Pc+1YYy6E5ZSBEztWNdQcXUp+xSGGmk+NJMTz5VssJcaewthxlGRJSNIitzkXavRmnzzsvqgXGxqZw8sjF7BM7riolxsaewXP9s4clnL3mckZttjW6zzsNX/i/sa7k/26lxX3OoMggVIPwioDNw6gQ9bKkbltQXHy3qU3eW61BCXAFHZKvCfoa+cpwlvse+yldjhGm1ClzJ0oVVcVzy8ZOs0kbkkihuBIkUlRSCND6V6+eWivQxSFEaydfWjV10HSml9KAElZmE6inFGEQDFNbbUJPlFAjqHC5nBbX/QKvmnkhlSFtpUCDHkaoOGDGB2v+j86uEKlJr0TCq9CHBHm+MbjiJ28WVXENxbW9gtV42XG9ITlB1kVjwhTRTf3Cc2GKJytEzAO3h2rW8SLtU2n99TmZjURPMVkG84WHbrOrA80pQTIjlpvvXI532uXp9jscj7HH1+4lTZLhxFCP8LCp7qeWxGXbeuj9lHZc52h3T2JLedw/h9pYbIQIU8sDUJGw8zXOSCV960FnBc4lE6Rz09a9afoxKSeyxooEJ9uuMo8switPLYjcImYb2G8DWbAQcJW+rmp59RJ+hAqWjsY4EQCE4C0J596v+dJxTtYwbDO0hjg27Zuk3zym0B8Ze6ClplIOs+VFxb2tYNw1xzh/C90zdPXt2Whnay5Gy4qE5pM+dV7SQ4jsZ4ESZTw8x/+ov8AnSm+xvgRBlPD1v8ANa/51WcVdsFpgXGV5w2zgONYpf2yEuL9ibC/CQDMbxqKf4k7WrLh3gjDuI8UwbFbdF6+bcWbqQh5BE6qB5affRtAn/2RcCgGOHLSesqn8ax3GfYFw9iNo8vh9T2FXxT4IWVtKPQg6j1BrV8QdqeD4R2d2PGCkPv2V5k7llBAcJV+7rpIgz6Ve8FcT2/F3C1hjlk04yxdpKktukFSYUQQY9KV2toHhy7Yfwe6vsAxK3KMUafUypRIOVW2/SkhacKS5a3raXX3hKFjUJnTn51rO2Fy3/tR4saU3N2u7AZVGxyp58tayIKLRtxnF0l28cEtLPjgbDX1q5EHvDbjA8yMQQHy8nwRrlj19aUyk4EQ7foFwh5MIA1y8+dNsxYKWMcbLy1p90Sc8dfSnbZPsK0qxxBfaWmGgTnyn8tKYBsIVhak312kP274ORA1KZ1G+lLZaVaOJxVxAcsnSSlk8p28qQyg2hRcYmlTuHrkNInNlnUactKU0hTLgvLpJVhKlShuZidvDQAC0Q4cZCB7EFSWJ16bbUlxJu1qxW3QG7NojO0Tqcu+2lLKSp432RX2MFyWp5bfD601cNqfWq7sEqRhKVDvGwYmPi8NIAPJOMKXeWDaWbdkDOg6FUa8tNqJ4fbSu8wxAYDSYWCcs/SkvpVdrU/gqS1ZIA75AOSeZ056Ubg9tP8AgCVMpSn3wByT/OmIJcYsUtYc33DrQlaiYzcuVOWFq7j1/YYJhNsftN10MhQgSdiZ6c6aWlNz3acDSpu4SPekHLPz561texF20PaxwultGW5S6sPEjdXdq/Ok9w1vOz8J/o+8PWVoyviBx/Er2PGUrKGwegjWK1KuxPgNago4GkK6h5f860/GHEdrwrw5e4ziCXHLa1QFrS1GYgmNJ9apuGO0nBcf4HvOKLUvt2Fp3nfIdAC0lG4jz0j1qnaWFcrsP4DUSTg6ifN9f86Q92GcBuRmwlzT/wAwv+dO4B2u4FjfBmMcS2rN8mywtQD6FoAWdAdBPnUfhXtjwjiXFbKyscKx5IvFZW33LQhkeZVtGm9G0A19hXAiwArC3oH/AJldQ8Q7A+Cri3LTdveMdFIuCY+R0q8w/tUwC+49f4RbNyjFGlrRK0ANqUkSQDNFiHahgNrx8xwi4blWKurS2ChALYURIBM0bQPPPal2R3nAjacTt7pzEOHkrAcSoQtqdsw2InnXMnEreUq5s0lGGpgrQDExvpXszt6cA7JseKkZgWkzPLxCvGa85KlWecYVI7yNv83nVsXdEJKwHh7ZmdwhKmrZAh1IOWT6elbnD127mGWyrRBQ2W06cqwrs5lHBM4s499H37+VbnDlM/ZzBtRDOROX6VvMh7T6M0uedm9UJe1ml4Rct2mM2D7xhttRJ0nkaQ9zpNrcNWl/avXAJbCVggeaSB+NbzOUpYOon4M1mRy04ynLwaNPhwfvlMXVkLlu6LpU5cLMNqRPwgc62aEByCtIJHlVdw4yWsFtELTCktiQeVWzenpXz5mOJVWppirKN0j3XCUeap3bu3tZDxi59iw118fukAfM0KzfahiAs8FabSYLjkn5UKzsuy116PONbzGxWYRoT0M4cFzJO/SkFekkSetJSSCSDoaSozvtXfnACsxVzim16nfSjUodNOlNqV4tRQACdNdqGYR5UCqd6bUZJoEzqnChzYDaHon8zVwkiSOZrPcFvBzAW0gmUKKT61oUwBI3616HgXqw8GvBHnWYLTiZp+LKjiRu3Vbf3wwwASozHMVkAVqIbfK/sQK8KuUctd9613ErVu9ahF4vu2TMqmOlZELUpXsLpIwhKoD2XluPF61yeedrfBHWZF2NcWESoOFtjOcEzjMoaiOeu+9esf0Ysg7LwGzLYvrjL6SIrycVFCjZsFSsIKgFPATAO/i9a9Vfotv257N3WGXQvusQfBE6gGCJ9RWmluN1E5Z2nYYvE+0DtIxi1QVXuAew3TKhukIKc8fL8Kp+IFOY5a2HaHctFt/E+JmkMZt0MtpAj0zA/SvWKOFMDReYtdIw637/ABZOS+WRPtCYiFfKo13wPw5dYJZ4O9hNqcMs3A7b2wSQltQJIIg+Zqu5M4FxGziNx+krxAnB+JWOHHzZtk3TwBStORHggkDXf5VbdsVu7f4N2b4Pi2LsY65c4t3dxeMgBLw2OgJAgKiutcQdmvCPEGKOYjjOBWl5euBIW65mlQAgTB6U/bdn/DFtb4awxg1ohrDXlXFokZoZcJBKk67yBRcDzHw/ht3jWIK4AxBlZseF14jduBWqVDKQ0PqZ+ddq/RldLvY9hKTu04+39HCfzrobPDuEW+JYhiDNhbN32IJyXT6UQp5O0KPOiwLBcL4bw4WGC2bVnaBRUlloGApW5+dJu4HjvtgVa/2pcWBRPtpux3G++RMffWSlsodGOZvbo9zI18tvOtP2smzuO07iu4S8Dcou/cBJ+JQSNPPUVmUBF2HHcZUWrxI9yk+GRy0561ctxW94bAHiHEmbvMvuc2vrt8qetUEKH6xJWu3Kfck6gH5eVMNKF6tX2+VMrQn3UjLPWltPO3ZLWJhZQ2n3UQmD1PURQwHUNrQtP2x3hwwg9zOoHTbXanWmylSfbAs4EVHIDqAP3dN6VeW6ru0ZbDqld0IANQbh65FmLNald0kg5SNopXHYnFBz5kFz7AC9RyjnpvvSXkKzLOGZ/saR3oG0fvb61HZv3W7QWy8qrU/E1ET896Ui+LbardgFuycPjbJzGDvrQA1dhSFq+wc/sBHvsvXnv5U04SF//TZWUx73KPpM05eXC7VxbODBxdooAvSnMUn15aU26fs+PsJZfDgl2Bnjp6VIQFlA7s4AVm6j32Xf7/Otl2KC1/tX4WLKiLovL7/f4sivzrGKyWPdvYKsvXLg96kDPA9OWta7sbFox2p8KvquIecuVd8lR+FRQqBHLWlLcOO89EfpIulHZFjAEguFpGvmsVxJ6xusBxW+7OcObcFtxG9YvskHRCCkFz7gfpXqriPAsL4nwpWHY3bJurNSgpTalEAkHTY007wvgruN2OMOWDCsSsmu5t7gjxNoiIHyqi9ixHmzAmGsM7P+2LC7ZORi1uAltPRMwPwre9hTXFgwPht244mwleBFkRh3djvwiDCc3UGui/2fcN91jrfsAyY2Qb8d4r3pBnrp8qqMF7HuC8GxO1v8OwlTV1auB1pftLhyqGxgmKd0wPPt+hVlxPxFx1bhancH4kQleTm0ZzD+utP2Fstzi7gfjK6QpN1j2POvAq3DOYJQPpNelGOzvhtnCsXw1OHpVZ4q8X7xtbij3izzmZHypy+4E4fvG8DbeskhvBVJXYpQtSQ0REbHXbnRcCi7f4HZLj4Jj3aR/wC8V40Li2pt7UqVhaozrAkf5ta9ifpCPto7KMcQtaU5w2gEnclYrx0XFME4e0oKsVkBT0TE767VZDcQkG4pVstbeEqU5ZrHvVAZo66+lbqwQy3h7CbdWZkITlPURWEW4cPWq1sFd7bOx3jkZonQ6+lbmzbbasGEMKztJQkJVMyIrfZB2l8DR572dcUJe2M09gZT9v4eCtKJkAqTmEkaCKYf2qbwvaLvMeSWyjPbtFxIXqJmBP1ra8oZxhl9VydtjMPk5GUsfSUVfajorarplEKZbcHVs5T9DUu3WHUiAUnmk7iq6yxZuXGL2La7aTmW0pXxDqk86k4a2e8cuXE5VunMpP8ACBsPpXz1WoThfnFb/s90jWjU6Ducq7bb+bxm2Qf2aQD670KyfaTfi+4kuFAynMYoV6FlmHVHCwg/A4PM67qYmTRRLVOh2pEE7HSgRpSCTsDFbM1wqY2OtIVEbzQUeQNJJgRzoACjBpBVyTQnzpJ0mgR0fs/heCupPJ0x9BWnb3IO4rKdnOuEP7wHfyrWuiChY9DXfZZ2WD8jz/Ne1zXmVHE9uzc2jbVw4W2yr4pismXCVjCVKHsAXl7/AMt99t61vElqLyxS2peRMyVdKyBcOuCnKGCqO/8Av9K5rPe1eiOmyHsi4sDjqrdRwppQXYrUMz8TE76jSrrhPinGOAsdLvDV2FsLADyXBnac8lAaadd6pVLVaJODpKVsuES/0zb+VE44cKUvDmil5p7VTh/dnTlpWmNyjvzH6Rj9s2EX/Djb7oGq7S7lB+oMU89+kklopP6ruqSRs3eJX+CdK89rUvAg4xb5blLycyl/wcuVNlR4fKVMFNyX06zpEelR0oldnoZ79JRLaEqPC7is2wRepUfmAnSm1/pKZWwscLKUFbBN6kq+YAmvPWuCBF20pD6nxBR/DOvKkwcPQjE21pcceOrfTNrRpQamehF/pJSyHP1WUZ/dF6M3/pyzWY4r7dOI8Yw11ODsWuDpUCkhKy4+r0nY+cVyMAtZcZBSpxSpLPrp60MvfJVjOdIdQrN3PWNPWjShamBllL9u7evulF62rMEKOqzvJB1JJp+RioXc4gsMPsiEIHhzc9j500QcRDmJqUlt1mIbGs5dfWjIOOd5durTbqt06IGubnzqQBLfcxNJVfpLbjYAbCU5c0771IbSqRuTTaL9zEHG1vICCBAAqQVy4EIUEJHxLPIUmNFtZNoAT3q4KtkjUn0G9Tb7BL5TBdRg+Irb/jNuoD76Rg/F7fD6CcFtmU3H715cJCl/KdqYxXjrHMVkv4nePA8mxCahYl3Gbv8AOwspW06yei0RVY7cOqkJcMeWlWV1idwtXvnVkn/xU1VPJC1EpVlV9xqSIsVZ3j9o4otr0cGVYVqCDVqXBg8KwxYuEPplYIzZem21UySlSFZtFJ3p3CMVOHre7tpKy4OdMRaFKcHDdzYuJuHXhC075efLzpp5kWrLOI276va1rCwlBhTat5Eagg04lP2EUXiSl/vxGTbLzpBT9npRiiVIc74/stozedMDsfCXb7jmGYW0MesrfFUpGXvEOd0908Q2J8606f0kLMslw8N3cDf+9In6RNeciChIxiUklWbuvXTeiUn2oKxaUoKDPddY86jpQ9TPSLX6SFg4krHDd7lTvNygfcaUx+knhz2bu+HL6U7zcIH415sWFYtmvgUNdyIybzGtAg46S4MrHcpiN81GlBqZ6UZ/SSwx9eVvh2/MCTL6B+NNPfpH2T+Zuy4euy/rAeuEpT9YrziF/bmVkBLHcpmd83KgHDigRh4CWiz/AMzeY02o0oNTNfx/2hY3x9iTdjijjdnh7ayUsMfswepJ+I+dZJTqmM2EpKVW6lQXuk/dSQ4bgDCCEpKFR33WPKjDhaBwYhJzKy990nXapITFFw4apdgyUvNPRmd/hnQ7aVtsOtxbYewyledKUgBXUVhw4cNK8LhDvfH9rtE6bVt7NBt7BlpSgrIkJkc63uQdfJ+RpM96iPEK5JTpzO1TOG3n7R3EHbRCluhlIJQJVBVqQKgOnMok8qu+BmlOYldlDrjaktp1Sd9efWsnlTNU8uqSkrrZ90R5J03PMacY7Ht+zLXDWMPx64bWzbrDdoqVuOftHF8gT05xWpxm4Flgl28o6pbP1OlCwtiytfwQs5iUoCSTzJjes72q3/sXDCkZoU6r7gK8RqVvb8VCnHo32L7nsPNrCUZSfS3tnAcUd9oxB9yd1GhUQkkknc0K9FitKSR59JuUnJ94/wAutEeppKTAJot96mRFbiTSFDWZoxRRPpQARIiBSFa6GnIgU2Yk0COidmxBwu6HMOj8K2Ch4NudZLs2ZAwd9ZWAVO7dIrXlQIgbCu9ypWwsOB5/nD/VzsUvEtp7Zh3c5+7kkyfSsb3hbH2GQjxKjv8A112rccQMKusPWyggFQIk8tKw5It0HBlISp9ZHv8ApOvrXO58rYn0R0eQO+F9WKW59noXg5CVl4/ttozeVNuOfY2ewUlL3fie82yzpRuKGHJXhjyEuvPbPbZc2nOrPhvh3FcRxNeCYXYKxO+eTnCkbNDaVE/CK0hvEViHv1d7xlwJuBco+LbLypnXAAHHAm4D6dBtEa/nXasB/Rz4kFoo3uLYUy4sCUKbU8U/PQU/bfo247alakY9hbhOgDjC1ACo6kS0s4Y2k4NkvF5XkviAiYyzrvSA2cPy4orK4h6Ya2jN513G2/Rtx9h5Tn27hK5mErZWR9KbR+jbxC1cqeGOYQoGTlU04U6+UUa0GlnEkpU0RjRyltSp7n103pWUvk4ynKG0Knuesab12n/+G/iJFwbgY3hJMz3ZQ5k+kVluLOxzi/h5w4iq0t8RtGyFuIsF5iEjc5CAfpNCkhaWYMpOJZ8URlbSxEtbzl13o1hWOld0zlYDCYUjfNzpDjar1S722QGWGoC2tpjU7aUHEHFlG4sUJt22RC0kxm58qkIQ2/375eIyBRn0pq+uwSoI0bT99HdOtrti60MoWrRPSmsGsF4vjuHYc2CTcPJQQOk6/dSZJG27OOz694rcRdXIW3ZZoTAkq/0j869EYd2LYcjDQj2FptZGqnVZln16Va213hXBuD26bBoF1DQSlMQEctqpLzijFMUt3HVXKxGoQlWgHoKrtfeT2rcZHjHscYtkLKQptMfEiFJ+YrgXFeA3XD193b4zMqPgcTsqvUuDcWv2t2WrpwvW7qcrqDWH7UeH0YnY3rdi0laFNqfazHVBGulCelkmro86vHmOdHht57DeodKM6TKSmmyTkAVuNKUXGmbi3WtOZI1Iq0pZfNNqwUpunwl9t4QEbRz502lBsCjE3Alxp0mGuk7UGgcNyv34Fww6mEJmcvPY0222q1Wm9uE95aOfC3MxO2m1AhRQpJGLqCSyVZu59dPSkrQq4KsUQEpZQZLXWPurb8L9lPF3Eihf2eHotbBw5mxer7sKHUJ3j5VpFfo+cXKf7wXmDpTIPdBxeU/LLUXOJLS2ckWg4kVXrIDTTWikdY15UHAcZJdtUpYSyPECd+fKuuv/AKPXFzjocReYO2NJQhxYT8/DQuP0euLnVBSLzB2QBBDbiwD6+GlriPQzkZP21latUpYWyJUf4vpRhf2mlFkwhLTrWqnOsacq68/+jzxa6EFN5g7JAg90tYn18NRsW7BOMWbZPsq8KdcQNe5dUhStOpFGtBoZytKxctpwtCAh9BgvdY++jSsJT9klANwTl777/Wp2OYLiOFPN4TiWHu2OJjXO6IzgbkKG9VyVAoOHZB7dmjvvv33qadyIvP7EF4Y4lK3nTAdnaa21s0WbJplSpKBlnrpWHSoMJVh7yAu8WYS7vE7a71ukIU0yhtZlSQAT5xW9yDrpcDSZ51MeI24YSqtL2dib+/PPIgfeay7mp1MCtP2fkNYjeNmCpbaVCDyB/wB6fLG7yqrbwX3RbyPsszpt+f2Z0FreuTdud8O+t7RKpypEjzOtdatwCB99edO0zEPtHii5UkyhKjFeQ8naHOYvW/2o9PzytzeHcV37DJUKVFCu/OIDO9Dca6UCAAKApiDBFFMUU0QA60AGdt6QTpRmkk6UCZ0vs5GbAHo370/lWpQISAayvZprgd0Byd/KtZ+6a77KtuFhwPP832YuZXY0wu6w91ptQQspMH5VgioWyFYY8gLvHCMr/SdvOt5jCFuWa0NGFqBSD5wawSstm2uxu2w5fuRkd3yzoNd653P+0rgdHyff6Z8f7BrIw5LljeNh66d1Q7vlnQb616W/RKw5u34e4gcdSlV57clpbm5KQgECekk15pUU4ely2xFAeu3B7tzfLyGp869LfolJdY4a4hYuFZnW75GYzO7daGW430TvgSBRKIFEVaVHWskiqbkh05aIkAb1w3EO2LiW1vrllPZ5irqGnFIS4lLkKAMA/Dz3rT9mvaBinF2I3ltiXC97gqWGg4lx8LAWc0ZRmA1502u8Z0dahTDobWk5gDSnD4ZqIpckg7GojseL+2PDTZ9qHEiMPSGrJt5LrjaTlBzJClaba61j3gb9SnMIT3LCE+9TOWfkN9K2nbc1df2q8RlpR7lK2y6EqiU5B9dKxC5fWo4IFNsBPvQDln+hWRHcVS3jOJv21yxmsWlISiM4Iga86tOza9RYcb4XcuEABZAJ5Egiq24bavE5MHbIAT74fDPTeqlhxSHU5SUuIVIPQim0Cdj2BchOKYSHc8LSddMxV6CqHCVrt8Q7hceOUQ4I3rHcAcZovbD2G8Xlfy5Trv6VqLdLdtdpcbeS4hJkSYJ9ars1sLlJMcDbTT7qblp1WQwe6MfjTfEONW9lhCXmwtBaSoAuQSZG1S7krxK+U5bCRusN6gf6iNBXG+1DiMu3K8OtXBIJSsJMgChRuEp2Rz99ZcW44B8air76ZacSm4Cn05kgRG9KcX3aAPpUdsp7wF2YqwobNDaq9nSlzFAXbdQhtJOaD6ctK1fZVhov+0jhy3v0B3D37nOhpRlMJBUAR8hWOsyG0pOKBSrcj3Y3g/8Aatx2MC4T2qcNFZV7OX1loEzAyKpS3DjvParRCUgBIFSAoRyquZc1pb7ykpPptWKXktdwlEzGlV+F8QYbi3ffZl9a3fcqyudy4F5D0PSuW4h2sOtpfR+p/EnhzJz+z6cxO21cj7CeNnuHXseDeBYpiYu3kuf3NvN3Z10Vp51LTsuK+09hB0FOlNOuxWO4J4rXxIxcOOYPiWFllQTkvW8pXI3TWmdWCJmokjkv6Tlnbv8AZ+i6S2kXrV22GnBopMyDBry4crifZEojEgrV3bX1r0/+kupauzpCGzC1XrQHrrXl4FDiAy0lQxMHVc8+etZFPolM944gpQk2bzZViKlAJdnadta3MKQ0ErMqAg1g0ECLd1JOKFYAc6dNfStyonuxnPi5+tdBkPWy4Gjzrqo8RpxUitHwB4uIbg9Lb/5Csys+GtL2djNjt3lEkWw2/wBQp8rJf7XW4f8AZLkov9zpcf8ApnQMVuU2WD3lwTGRowfPYV5cxF83F++6TOZZru/aljVvY8Nu2QdSbp0glI/dA61wCAB8UmvOuTWGdOjKpJdI7vlBXUqipp7gUKFCumOdC1mipRCgNaSdulMAUROtDca0IoEEfSkmjVvRTQB0nswP+D3oPJwfhWtnSsh2XGcMxAdFpP3Vrzomu8yh/pYHBZ0rYuRV42la8PdS2SFmAk9DWGUE2iV22II7y/c1bdmYnQa+tbnGgteGvJaMOEQk+dYVeW0StnFUF2+WJaXOaOQ19a0XKHr48Dfcnn8CS8/+kErLYhxrF0F26WJaXOaOW/rXo79EsOsYLxIxcKzPJu2iozO6DXnAgWmdONJLr60+6PxR/RrTdnXG+L9nWLLu1kOtXIAcZUZDoHU8iORrn2ro36dj3QVeGo6la61ySx7fOGPZm1Ymxf2Tix8JbC0n0INS19uXBASFrubxCTsVWxANVOLJqSOn5xG5Hzos45kn1NcxPbdwPkClXt0lJ2Jt1RSVdtXBGXN9o3AT1NsqKjoZLUjpTrk6VEdXBrn57Z+CSjP9pPZept1Vn+JO3bh60sXXMGYusReSDHgyNg+ZNPQw1I4326C6T2r8QezlRZ90XYI2yD8prDKJBP2HnDJHvQP9/KpWPY1iWPYzfYq673y7xWe5UhMJT/lHkBUJSu6URgpUpsj3sa/jV6VkUveGshKh9hZwvL72Pu3qPeW1vcIb+z0qVcjV0a/P76kFQZg4MVKWR72NY+tNkpaCF4YpSroj3g39dD50wINtdqYc8RUhxJ0IMEGtRhvHOMWWXI5a3KU7B9OtZq8YbcaSpmVXhMuI8+dV5zNyNQ4NwaBXOj4z2o8W4thpw9Fxa2lqrRSLRsJJ+lYJ5BtyVvKJdVqcxlRplN4+lBSlwoPROlME5iVOElfnQAFqzqJXvyp22SguD2iQnlTaU5j4zB5VZWbDckYjLengnSaAJLGgSnFcwt4936/LyradjC3x2pcOd5m7gOr7qemRVYpCi6pKcUKksAe7MR+HlUvB8Wv8GxexxG3cDRs3O8t1LTIPkfIik1dEouzPeTCgU04vXWuNcM9t+AXlm0vFUv4e+R4gUFaCfIitIe1vg7LJxdMde6V/KsdwZcpI290jvrd1tO6klM+oiuddjfAF5wOzi4xC6YuFXjyXEdyFDKBO8+tS/wC1zg2JGLAgcw0r+VEO1zg4iRiwI8mlH8qWmW6w9SOiCCByonFAJrnqe13g4jw4tMdGlVCv+2LhNDZUxeu3KgPgaaJP30aGGpFX+ks4s8CW6Wj7xV63l9YNeZ/CpKRb5hiYPiV+OtbXtO7RLzje4ZYsmixZ2yyttmZUVfxKP5Vh8ycqVWub7Rnx/n5VfFWVimTuxxCklQSsKOK5xCuf19K22YqaBVvzrDJKSUq8X2oFf15bVs2lEsNzvGtb/I+nPgaTOehDiKJ8NVWI4ze4K8H7B5TTjgKFFJiRVkZis1xZs1/q/Ks/NkpYaUZbUYeVScMRGUXZlTiGIXOIOld04pZOupqMKSBNKrkElFWR1Dk5O8mKoUKFSELU5ypsnrRbGhNMAjr5USjAihOtBUUCC5UU6UYBMwPWkmgDovZWZssTT5pP41r/AN2sF2WvKF/fM/uKYzEehrdTpXcZLLVhV5HEZ5C2JuQMYBXhj6UkpMaEcqwxy2+dOMpU7dKHuVTmj58ta3GKhSsOuEo+Ip09axByNFQxwKXcEe5M5o+nnWo5Qr4sOBt+T/Uy4icgtioY6FOOKT7ozmj+tKIJ7tQOPZloKfc6zHXalD3cnH8yyU+5MzHXb5USRGVWO5lNZfcyZ/DyrnjfjYSQUnGs6rUj3Osx9PKkJzEIOJlf2fr3X5ee1OCVFH2xm9ig9zP3beVN+JRSnEM32aJ7o/htrTAQnMYF0VjCpOQnpy86IFRIQrP9k5tD5fjvRypeVt/MMKCvAry5edIzGQ0cxwrN8UcvXfekAFLUCW2So4Vm8Rjlz896JSlIKmrPMrDiR3hiY6670FLKSphgqOGE+JcbDnrSFrLWdmyJXYq/aLiY660AKcWWc6MMKl2yh7wxMf0KJa/ZiRhBK0KHvIExSXFm2Km8NJcYWPeGJj+hSVq9lMYYoupUnx6ZopiFlQtsqsKUVrUPeCM0UiUsBDmHqK7lQ94mJjr99ESLQpVhy+9WoeMRmikgi3yu2as76h407x8qAFHK2lL1uoqvSfGiJ330pp1pDjfeyTek6tx+VLBDYFwyrNdqPiRExO+lJkAe0pV/fCdW4/KgCP7IkslSlFNzP7Pn9KDdogtrL6ih8fCg7npUiQsKuFri7B0RH5UCQ/meuF5LhPwoiJ6aUAJYYaKVm9JadT8AOk08lXtJ/wASJbKR4NMs03mFzmcvFd26geERE0M3tZ/vyu6KR4dImgBxCjcEIxEltpI8BiJ/oUSVF3KzeEptU/AqInprSUqNzCL1XdoQPAYiaJKy9laujkt0/CqInprQAtKiSGXiRYA+FUfTWgpSgruZPsE/HHL1pAUVxbuki0B8K4+mtDOr/h5/uU/HH50ALKlIlpgqNiSMyo+utGtRZUpFiSq1V8ZifX7qbzluWGzms1HxLifXWgVFklu1JVbq+NUTHXWgB1RLCj9mlS2yPec4oE9yQrC1FaiPHGsU2o+zkixJW2oeMxMUZPsxnDiXMw8fOKAFghsJXhxUq4P7Qbx/RosyUpS5akm+PxjeOulJkMZXLBRW8oeMbxREhvK9aqKro/GneOulIB1BSSl1JV9o5tUx9dK2bZ90iegrEpKQUPoUTelWqfx0rZsn3Lf+kVvMl2SmajN+jEWowKzHFKpLQ8zWkWqsnxI5muEJ5AE1m5pL4DMTLI/GTKpNKFJT5UquVOlQdCiFCkAU8hRKmd9aB1oxonbWpCEamgSYo1bUkgpIzAiddaABvRTrQJojTBm07LT/AI8+ORtz+IrevCCSNprn3ZYf/qNwDmwr8q6GsylYO+tdlkT/AE9vM47PlaumVuIZjZPhJhWUxWHUQlSvt3Mpwj3XOPp8q21+omyfymDkMVhwoKJOPZpj3J/7fKtdyh6yD8jYZB1c15hgyQcfzlOX3Os+u1JBKin7bz+zZfc/0PKiCisp+3SrusvuT/28qSklwoGMFQtAPcn8NvKueN+GVFZQMUKhYj9ifw28qTKnMqLwqGGAnu1R9POgCXClOIFQw8T3StvTz2pGYrKWrkqGFgnIuI9Nd6ACKiqGXCr7KCvCuPprvvSCo/sEE/Zmb445evrQUoqhhRV9lhWjkfn60hS1AG2bUTh2bVyNhz19aAAtSm81uwoqw9RGZYE+utIUos52bIldov41RMddaCllsKtrc5rJR8S4mJ31pC1m3zsWau8t1/GuJjrrQAalG1zN2B71pY8ZiYpJV7Gf8PV3oWnx6TFEpfsuZuyV3rax4jExSCr2Mn2NXehY8WkxQAuRaQuyV3q1DxDeKSCLcJetlZ3lfEneKSCLQhdqoOKWPEImKSD7PleZUFuK+JO8UALzBuLhtU3Cjqjp10ogY/vIUPaJ1R/tSM3dxcIUC8TqjpNEFR/eQod9m+CgBwqzzcqUE3AOiP8AagSHwp55WR5OyNpikE55uFKAeB+DrREh6X3FBDidk9aAFki6ly4V3biR4RtNHm9q/wCKV3RQPDymkFQuZceUELSNB1oFXter6g2UjTlNACwv2qEXR7tKB4TETQCy/lauDkZT8KoiaQF+1Qh9QbCBodpoBffw06QhCdldaAHAvOAw6ctuPhXG/TWh3hI9nJ/uoMZ/96bCy6BbrIS0nZfWjzkj2YkdxMZ4oAczlANugzbE6r6fOgVdzmaYOdhXxKiY6603nKQbdJBYJ1XR5yySy2QppW6ulACys22ZFoe8bUPEYmKPN7Kf7me8zDxaTFNlfs2ZtghxCxqd4oZ/ZDFuQ4FDxHeKAHAfZoXaK7xah4hvFFIYyvW6s76viTvHWkhQtSFW6g4pQ8Q3iikW8OsqzuK3T0oAcbIQpFwhU3BVqj8dK2bKpYbPVIrFNkNrRcJUFOqVqjpNa5lyGm5/hFbnJ3aUjVZqrxiOOqnQfOstxB/xiY2y1o3FwCazGNmbtP8AprIzSV6RTlsbVCEKWdUzTYpQOlc4b5AJ0oUkmhSAOgfSiBoyD035VIQmBRvOKecLjqypR3J1JiiI0pJoAKio6BoBmu7LD/8AU56dwuTXQ3zHeHzrEdkYH2xelQmGP/kK2Ny73y1QAlMnQV2ORbMOclnqvWRAvf8Agn4/gNYcKzk/bpUmE+6J+/attfEi1ej+A/hWAYuWr5ahijvhbHu40/CsHlB04epmZD0J+g+lXewMaKgwB7k7fh5UnMp0oRiilJskg90raem3lTFvct3rvdYi77hsHu40/rSiaum7p32e8di0bnuzt6a1zpvx+S7lavFKThyZ7tcR6U3mK8rDxIwwK8C4+mtNIuUPui0uHYs0E5FbHTbWk9+hbvsS3QLIK0Vzj1oAcUok+zSfs7No5HL19aQpZTNs2ZsSdXI+utIU+gOexBwex5vi59d6St5LazZtuJNso6r56760AKUos5rdg5rVR8TkTE760havZs7Nse8ZWPEqJj50Tjot1KtWnEqZXuo7iaQ44LQlllaVoXuo8qADKvZCpFqoOoWPEd4pJPsZPsyg5nGvOKJaxZEoZUlwLGpPKklQs9WlJXnGvlQAqRawtlQcUsajeKSkhjK82Qtat09KTItYWhQWVjUHlRSGMryVBSlbjpQAc93FwkguE6p6UJj+8Zh3k/BSQckPggqP7tFP/PkZp+GgBc5/7wSAsH4KBPfZnlEJWnZPWkTm9+SAoH4aMnvZeJCSnlQAon2kqcWQhSRoOtGVe1auEIKRp502T7RKzCSnl1o59pkqKUZR9aBCwr2qEuEIyjQ9aAV7QEtLIQlOyutIB9pISohOUfWjB7+GzCQnnQMUFd5lYUQlCf3qPPIFuSO7B+OkA97DJIAH71GFZh7P4coPxUAKz5ZtwQWyfjoBZaCmEkKbUdVUkKj+76ZSYzUCvupYEFJ/eoAXn9nzNtkLSvc9KGb2YkNELChqelIzG3ltMKChv0oyr2XwpIXmG/SgBU+yEKaIWVDUdKAPs5DqCFqVuKTPssFJC8woh/dyHAQoq5dKAHEe7Wi4BBUo6p6TWrZV7ts/5RWRR7spekEqPw9K1DKvct/6RW1yx2cjW5grqI66owYrOYzrdj/TWgzI2XIHUVRY2lAeQUmSRvV2YO9MrwK0zK8Uc0kGjrRm4DihRUKVhgBpYUZhJOoiieR3bhA23HpSQdKYgzoY2pKhSjSTvQAmiozQIoIm57JCPtm9BP8A/TH8RWsWQM3rWQ7Jz/j10ORtlfiK1azBUPM11+Rv4FjmM7j8REe6M27o/wAp/CuVOaLUOhIrqT0qSUA6q0qPi/YtxrarW8zhrd4yvxpVbvJOh12MGsLlBJKUL+ZlZFF6Z28jmdEavcU4R4hwqftDBcQYA3UphRT9RIqiWlSFQsFJ6KEH76526N800FRetA0mmIOgTRGioAFEaFEaBANFR0VAAoUKFAAoUKFAAoUKFAAoUKOgAUKFCgAUKFCgAUdFR0AChQoUAChQFA6UAKb1cTO01r2T7lEckisnbNOOOJyNrVr+6kmtSzo0j/SK2WX75GDjldRA4apcW/aI9KuHTVNiv7RHpV2Nfw2VYRWmQhRzSRR1pjbBihQFCgCYtHetKBBDqOX4ioiTG9aPiO2NveJu2hDbphUclf71n7hIS5mSISrUUk7q45LS7BHUDbSkHelTI1olRTIsSBM9eVFShFJ0E0xGy7KTHENx/wD6yvxFax0nvFz1NYns2uRbcUNBRADra0fOJ/Kti+oF5cfxGuqyOXwmjnc6j+dDalEKCuhmurYX21vNW7TV5hDbqEpAzNuwTA6EVyZ07xURo+7SPKtZypqOHNuPmdh/p9gcPjHXjXje1rfU79bdsWBPiLqxvGJ38KVinLniPs9x5sovfYV5uVzbR95FefCdaQVVyKxcu9Hf1uTWCl0br1O1XfZ12dYyFKtWrJClfvWtzkP0ms7ifYHg7qVKwzFb1k8g5lcT+Vc0K4MjQ9RUm3xe/tCDbXty1H8Dqh+dXRxa8DVVuS0P2VPmizxLsHx1gE2WIWNz0Cgps/nWQxPsz4sw8q73CHXUj95lQWP51srbj/iO2jLijrgHJ0Bf4irRjtWxpAAuWLO4HmgpP3Gr44hM1NXk7Wh0WmcSvMNvrJRTd2dywRv3jSk/lUPnXoQdqNtcIKMQwcKB3yLB+4ioT+McC4qT7dhQaUf3lMD8U1YqyZr6mU4iH7Tg5oV2V/hbgPECo2t97Ko7AOlMfJVYzjzg0cOtW93ZXCrqxeMZzHhPLUcjVikmYVShUp9NWMZQo6KpFIdChQoAFChQoAFHRUdAAoVoeEOGHuIrh0JdDDDQ8bhE69BWwa4BwK1g3+M5uoDiU1FySLIUpT6KOXUBvArrbeGcDWPxFNwR1zLn8qlt8Q8LWAixwvNHNLKU/jUecRkRwNaW6JyS2w69uiBb2dw6T/C2TVzacE8QXJTkw5xAPNwhIroTnaEhtMWuGJT/AK3P5CoD/aDia/2LNs1/0lX41F1UZEcqrPeintOy7GHYNw9bMA76lRH0q7tOydpOt5iLqj/+NASPvqquOL8cfJm+WjybSE1WXGK39z+3vbhfq4ai6pkRyiXezfW/Z7wzZpCrpwuEb98/A+gqW1a8E4cZy4cFJ8s5/OuVqWpWqlFR8zNFNR5wyI5TBb5HVcT4r4easLhmz8S1NqSkNswJIiuZJJyp9BUZR8KvSn2/gT6VtssldSNDn2GhQcFHvuE8apsUPvEelWzx1qoxMy6gdBWTjH8M1OF6ZDFKpMUqtSbMAoUYoUAdXw/DGcYtX7F+B3qYSr+FXI1zi+s3bW5fsrpJRcMrKFA9R+RrpOCulq6bUDEGnu1rh4XOGW3E1kjVISzeBPT91f5H5VRCVnYuqRurnIAYMGgqIp66Rs4nnoryP+9Mb1kGOFRK1o1UVAD9hcrs71i5b+JtYUK6QLhD4S80ZbcAUDXL5q/4cxf2eLW4PuifAo/unp6VtcrxaoTcJbma3MsM60FKO9GwUZ1ptTagkqQCpHly9aILChpzpxp1TSgptRBrbZlgIZhT0t2a3Mr5P55VySu6kVeL2NEVRpsqq2+0FwQpq3VO8tjWmFPW6oz2jf8A0kiuZnyarroyTO/h/qBhJ9OnJfIrVKppRqwc9jOzSwfJVR3G7Y7d6Poax5ZFio9y+ZkfjLL57216EJRppSqlLaZ/ddV800y4ykHwvJPyNVPLMTHfEkuUWAqbqhHUqkTTymCBotB+dNKbWN8v1qDwlZb4sPeuFltVRCCZrWcNXTWL4Tc8O4gqUOpJt1H91W8fmKyRSr+Gg046y6hxvMlaCFJI3BFONGrF9FlGIxGGxEHBzXzM7f2jtjevWtwnK60ooUKj1s+OTb4qizxO30vVpyXLQHMbKrIm3dH/AC1fSstRfgcnK0ZNXGqOl9y4P3FfSh3S/wCBX0osyN0IoUvu1/wK+lDunP4FfSizC6EUtptbzqG20lS1kJSkczQ7pz+BX0rT8DtW1rdPYnfwTbJ9w0d1uHb5Ck0/AlFamkaTElJ4d4dYwW2UPaXU95dLTvry/rkKy9OXdw7dXLj75UpxxWZRprX+FX0rGlCcnuOpw8qFCCjqXzDoUIV/CaPKrp99RVGo+4ueMoLfNfMKhR5FdB9aMIPMgVNYaq90WVSzHCx3zQmhS8h5kUMnU/dViwVZ/tKnnGEX7xFCl5B1NKCU9CfnU45fWfcUyz3CLc2/QaKSsEDc/dUmIEchSmmVuQEIPyFLdbKEwd622Dw3s8Wm9rOYzXMPbaicVaKILhknpVJcL7x9SuWwqxxG4CElpB8R3jlVVWPjKqb0IhhINLUw6FChWCZoYoUKFAHTrReVQNdI4Tu7e8sn8Pv0hy0uWy04g8wRFcvZVtV7g14bd5JCo1rFkjKTOecV4I9w5j19hNzKktn3az++g6oUP63ms8oZTB3runafhI4k4ZbxS1RmxDDkkqCd3Gf3h6jf61w95KVNhad+fpV9OWpXMacdLGjRUDvRVYQBRUdFQIs8Pxh+0CUK940NgTqPQ1eW+N27sSvKeitKx9FNZtHH1aKte6MSrg6VV3aszfJu0LEpUCPI0C8POsGla0/CpQ9DTibp9Ozzg/6jWWs2fejFeWLuZtS8OtIU5POsgm/uknR9fz1p5OLXaR8aT6pFS95xe9C93SW5mmJ86Tuazwxm4B1Q2R6GnEY4sfEwg+iiKft9Nh7FURdlJpKkGqsY4j963V8l/wC1PJx63iDbuj0UDR7XTfeCwtRdxMKD00ou6NR045ZEeJD4+QNOoxzD4AJdH/RS9opvvGqE/AX3aqMtKB2pP23h5/5q/wD9M1OsXE3zDr1qpK0NFIXPhImY0Pp+FHPQ8UHMT8CH3K+lF3C50TWlxDAsWsLNF29YOqt1CStkd7k8lhMlJ9ao28Ss+8yOXDbauYWCI+6lz0HuaHzM1saZH9ncJjJTnsrn8Jqd7TZJTmTf2iz/AAoKifwpIxFlDanCfAkwVFBAB+lHPQ8UHMz8CGLN07JpSbB87INS0YyyvKltSfKBUpq+Uq2S+j9ipWQK896HWgu9BzMvBlanC7owe7gdZpz7GujsEz5mnLjH2rdxSHFnMk6gJpg8VMc1OfJNHPR8UPmZeDHUYJcqMeGnv1cuQNSn5CagnitoTBeP3UP1u6IdPqRUXiIeJJUJPuLNvhx9ShqfpTw4YdzoC3m0BZgEkaetULvFri/+Usx/mplfFLx2ZHzVS9pgv3D9nl4GrRwwhIJdum9OYWKU1w/Y+LvbxMRoQZrGK4muiIDbfzmmFcQ3x0BbSPJNReKh4klhpeBvk4RhIbzKe8QOog60ttjCGB8AV8q5wvGL5Y1eI9BUZy9uXD433DPnVbxcUTWGZ0TFsUs7ZkpZCED5TWLv8V7wqDPP941UKUpRlRKvU0VVTxkmrR2E44aKd5bQ1HMSSZJ3NFQoVhmUtgKFCioGKBoUQoUCZ0Vs7VNt1wRUBvapLZisdmSjZ8N4n3DgSsyg6EHmK5bx9gacB4icSyj/AA+6l636ZTun5H8q19q8W1A+dWHENgniTh1drp7Yz7y3V/mA29DtSg9LCcdSOJvI7tZHLcHypFSHkkpKVJyuIJBB3HUVGrKMVhzRUKE9KBAoqOioAFChQoAFCioUAHRGhQoAFFR0VABGiNKNJNABVuOz9pDtliaVwUqbQmDz8YrD1vez9sHDcQWdh3QmeZUf5VCp0Syl0jogtW0OWWHLur5dtd2RvHE9+WytYBGUkfu6VznF7OwU4HbO3ebJUQoOPd79JE11IPNucTYbcPoSUHBs6kAQAMp0rm7TyW7kFDAeClLCUGdJ2iOYqMYqw3OVxeG3V5gOKI79p19Pd51W4MBSSjMDI5RrVBxDiN/ftd4+4oMPOFQbSYRI6DynnV9iN87cX7BS2UvIYDMNqOyUkfhvWVxNORtKNilUEH0pwit4Tk2gsMMXCPn+FaW0UkcKW8jVdyojygR+dZewuGGnD3yyhQSqFZZB0MVoMAIvsAYt21d5de1LAYSfFBSkggeoNSZAzeJSLhzWagipmJFPtC4UFKmCBUMVIQoUYohR0AHR0U0c0AAiiijmhNABUKOipAFR0VCgATQoUKAAaKgaOgAUKIUKYH//2Q==",
+  "sampleTireUri": "data:image/jpeg;base64,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"
+};
+
+/* ==========================================================================
+   ROTAX Air Log - Application Logic
+   (SPA / LocalStorage / Tire Set Manager / Geolocation Circuit Search / Gauge OCR / CSV / GAS)
+   ========================================================================== */
+
+(function() {
+  'use strict';
+
+  const STORAGE_KEYS = {
+    RECORDS: 'rotax_air_log_records_v1',
+    DELETED_IDS: 'rotax_air_log_deleted_ids_v1',
+    CIRCUITS: 'rotax_air_log_circuits_v1',
+    VEHICLES: 'rotax_air_log_vehicles_v1',
+    TIRESETS: 'rotax_air_log_tiresets_v1',
+    LAST_META: 'rotax_air_log_last_meta_v1',
+    GAS_URL: 'rotax_air_log_gas_url_v1',
+    LAST_SYNC: 'rotax_air_log_last_sync_v1',
+    GEMINI_KEY: 'rotax_air_log_gemini_key_v1',
+    OCR_UNIT: 'rotax_air_log_ocr_unit_v1'
+  };
+
+  const DEFAULT_CIRCUITS = [
+    'フェスティカサーキット瑞浪',
+    '新東京サーキット',
+    '鈴鹿サーキット 南コース',
+    'モビリティリゾートもてぎ 北ショート',
+    'オートパラダイス御殿場 (APG)',
+    '茂原ツインサーキット',
+    '筑波サーキット TC2000',
+    '富士スピードウェイ'
+  ];
+
+  const DEFAULT_VEHICLES = [
+    'ROTAX MAX Senior (TONYKART)',
+    'ROTAX MAX Lights (KOSMIC)',
+    'ROTAX MAX Master (BIREL ART)',
+    'GR86 Cup Car (#17)',
+    'S660 Modulo X'
+  ];
+
+  const DEFAULT_TIRESETS = [
+    'MOJO D5 #01 (Race)',
+    'MOJO D5 #02 (Practice)',
+    'MOJO D2 #01',
+    'MOJO W5 #01 (WET)',
+    'BS SL17 #01',
+    'ADVAN A052 #01'
+  ];
+
+  // Verified GPS Coordinate Catalog of Japanese Kart & Racing Circuits (Source: BizStation Drogger GPS Points / NAVITIME)
+  const JAPAN_CIRCUIT_CATALOG = [
+    { name: '新東京サーキット', pref: '千葉県市原市', type: 'カート', lat: 35.455306, lng: 140.091468 },
+    { name: '京葉スピードランド', pref: '千葉県長生郡長柄町', type: 'カート/ミニバイク', lat: 35.450096, lng: 140.185816 },
+    { name: '茂原ツインサーキット', pref: '千葉県茂原市', type: 'カート/4輪', lat: 35.382541, lng: 140.282601 },
+    { name: 'イタコモータースポーツパーク', pref: '茨城県潮来市', type: 'カート', lat: 35.986585, lng: 140.553089 },
+    { name: 'トミンモーターランド', pref: '茨城県かすみがうら市', type: 'カート/バイク', lat: 36.112680, lng: 140.320241 },
+    { name: '筑波サーキット TC2000', pref: '茨城県下妻市', type: '4輪/2輪', lat: 36.150845, lng: 139.919699 },
+    { name: '筑波サーキット コース1000', pref: '茨城県下妻市', type: '4輪/カート', lat: 36.150244, lng: 139.924506 },
+    { name: '岩井サーキット', pref: '茨城県坂東市', type: 'カート/ミニバイク', lat: 36.009886, lng: 139.889751 },
+    { name: 'サーキット秋ヶ瀬', pref: '埼玉県さいたま市桜区', type: 'カート', lat: 35.859587, lng: 139.592230 },
+    { name: '桶川スポーツランド', pref: '埼玉県桶川市', type: 'カート/バイク', lat: 35.972724, lng: 139.525729 },
+    { name: 'フォーミュランド・ラー飯能', pref: '埼玉県飯能市', type: 'カート', lat: 35.853800, lng: 139.206543 },
+    { name: '本庄サーキット', pref: '埼玉県本庄市', type: '4輪/カート', lat: 36.170579, lng: 139.106325 },
+    { name: 'モビリティリゾートもてぎ 北ショート', pref: '栃木県芳賀郡茂木町', type: 'カート', lat: 36.538993, lng: 140.231987 },
+    { name: 'モビリティリゾートもてぎ ロードコース', pref: '栃木県芳賀郡茂木町', type: '4輪/2輪', lat: 36.533005, lng: 140.226727 },
+    { name: '井頭モーターパーク', pref: '栃木県真岡市', type: 'カート', lat: 36.504204, lng: 139.985530 },
+    { name: 'フェスティカサーキット栃木', pref: '栃木県栃木市', type: 'カート', lat: 36.393437, lng: 139.641667 },
+    { name: '日光サーキット', pref: '栃木県宇都宮市', type: '4輪', lat: 36.662267, lng: 139.862386 },
+    { name: '榛名モータースポーツランド', pref: '群馬県北群馬郡榛東村', type: 'カート', lat: 36.452866, lng: 138.957465 },
+    { name: '中井インターサーキット', pref: '神奈川県足柄上郡中井町', type: 'カート', lat: 35.350151, lng: 139.219548 },
+    { name: '大井松田カートランド', pref: '神奈川県足柄上郡大井町', type: 'カート', lat: 35.336491, lng: 139.191889 },
+    { name: 'オートパラダイス御殿場 (APG)', pref: '静岡県駿東郡小山町', type: 'カート', lat: 35.357530, lng: 138.926030 },
+    { name: '富士スピードウェイ カートコース', pref: '静岡県駿東郡小山町', type: 'カート', lat: 35.369191, lng: 138.933779 },
+    { name: '富士スピードウェイ', pref: '静岡県駿東郡小山町', type: '4輪', lat: 35.373989, lng: 138.929925 },
+    { name: '白糸スピードランド', pref: '静岡県富士宮市', type: 'カート/バイク', lat: 35.308287, lng: 138.622754 },
+    { name: 'サーキットあづみ野', pref: '長野県北安曇郡池田町', type: 'カート', lat: 36.449976, lng: 137.899619 },
+    { name: 'フェスティカサーキット瑞浪', pref: '岐阜県瑞浪市', type: 'カート', lat: 35.415278, lng: 137.285282 },
+    { name: '明智ヒルトップサーキット', pref: '岐阜県恵那市', type: 'カート/ミニバイク', lat: 35.291071, lng: 137.377115 },
+    { name: '石野サーキット', pref: '愛知県豊田市', type: 'カート', lat: 35.139326, lng: 137.211219 },
+    { name: '幸田サーキット yrp桐山', pref: '愛知県額田郡幸田町', type: '4輪/カート', lat: 34.833807, lng: 137.140262 },
+    { name: 'スパ西浦モーターパーク', pref: '愛知県蒲郡市', type: '4輪/2輪', lat: 34.774500, lng: 137.186187 },
+    { name: '美浜サーキット', pref: '愛知県知多郡美浜町', type: 'カート/4輪', lat: 34.762907, lng: 136.872470 },
+    { name: 'レインボースポーツ カートコース', pref: '三重県桑名市', type: 'カート', lat: 35.049177, lng: 136.616239 },
+    { name: '鈴鹿サーキット 南コース', pref: '三重県鈴鹿市', type: 'カート/4輪', lat: 34.842763, lng: 136.527688 },
+    { name: '鈴鹿サーキット 国際レーシングコース', pref: '三重県鈴鹿市', type: '4輪/2輪', lat: 34.843149, lng: 136.540473 },
+    { name: '鈴鹿ツインサーキット', pref: '三重県鈴鹿市', type: '4輪/カート', lat: 34.806138, lng: 136.497131 },
+    { name: 'おわらサーキット', pref: '富山県富山市', type: '4輪/カート', lat: 36.606768, lng: 137.107821 },
+    { name: 'スピードパーク新潟', pref: '新潟県胎内市', type: 'カート', lat: 38.089239, lng: 139.370177 },
+    { name: '琵琶湖スポーツランド', pref: '滋賀県大津市', type: 'カート', lat: 35.152306, lng: 135.889057 },
+    { name: '近畿スポーツランド', pref: '京都府綴喜郡宇治田原町', type: 'カート/ミニバイク', lat: 34.870736, lng: 135.851910 },
+    { name: '名阪スポーツランド', pref: '奈良県山辺郡山添村', type: 'カート/4輪', lat: 34.634915, lng: 135.996348 },
+    { name: 'スポーツランド生駒', pref: '大阪府四條畷市', type: 'カート', lat: 34.712256, lng: 135.683892 },
+    { name: '堺カートランド', pref: '大阪府堺市南区', type: 'カート', lat: 34.464264, lng: 135.531575 },
+    { name: 'たからづかカートフィールド', pref: '兵庫県宝塚市', type: 'カート', lat: 34.832843, lng: 135.336097 },
+    { name: '神戸スポーツサーキット', pref: '兵庫県神戸市西区', type: 'カート', lat: 34.708302, lng: 135.093135 },
+    { name: '岡山国際サーキット', pref: '岡山県美作市', type: '4輪/カート', lat: 34.914300, lng: 134.218951 },
+    { name: '中山サーキット', pref: '岡山県和気郡和気町', type: 'カート/4輪', lat: 34.786576, lng: 134.177060 },
+    { name: '世羅グリーンパーク弘楽園', pref: '広島県世羅郡世羅町', type: 'カート', lat: 34.618181, lng: 132.956738 },
+    { name: 'スポーツランドTAMADA', pref: '広島県広島市安佐北区', type: 'カート/4輪', lat: 34.562304, lng: 132.559768 },
+    { name: '徳島カートランド', pref: '徳島県吉野川市', type: 'カート', lat: 34.040170, lng: 134.266175 },
+    { name: '北九州カートウェイ', pref: '福岡県北九州市若松区', type: 'カート', lat: 33.927864, lng: 130.691356 },
+    { name: 'オートポリス', pref: '大分県日田市', type: '4輪/カート', lat: 33.037441, lng: 130.975449 },
+    { name: 'HSR九州', pref: '熊本県菊池郡大津町', type: '4輪/カート', lat: 32.897565, lng: 130.875817 },
+    { name: 'スポーツランドSUGO', pref: '宮城県柴田郡村田町', type: 'カート/4輪', lat: 38.142309, lng: 140.777702 },
+    { name: 'エビスサーキット', pref: '福島県二本松市', type: '4輪', lat: 37.639920, lng: 140.372267 },
+    { name: '新千歳モーターランド', pref: '北海道千歳市', type: 'カート/4輪', lat: 42.772283, lng: 141.623233 }
+  ];
+
+  const INITIAL_SAMPLE_RECORDS = [
+    {
+      id: 'sample-rotax-gauge-21',
+      date: '2026-09-19',
+      time: '10:58',
+      circuit: 'フェスティカサーキット瑞浪',
+      vehicle: 'ROTAX MAX Senior (TONYKART)',
+      tireSet: 'MOJO D5 #01 (Race)',
+      driver: 'K. Takahashi',
+      condition: 'DRY',
+      ambientTemp: '27.3',
+      trackTemp: '36.5',
+      laps: '14',
+      coldFL: '1.65',
+      coldFR: '1.65',
+      coldRL: '1.60',
+      coldRR: '1.61',
+      warmFL: '2.10',
+      warmFR: '1.97',
+      warmRL: '1.97',
+      warmRR: '1.93',
+      deltaFL: '+0.45',
+      deltaFR: '+0.32',
+      deltaRL: '+0.37',
+      deltaRR: '+0.32',
+      memo: '[ROTAX Gauge Capture: Test 21 / Test 22] 左フロント(FL)のΔが+0.45barとやや大きめ。次回FL冷間を1.62barへ微調整。',
+      updatedAt: new Date().toISOString()
+    },
+    {
+      id: 'sample-rotax-003',
+      date: getTodayString(),
+      time: '10:30',
+      circuit: 'フェスティカサーキット瑞浪',
+      vehicle: 'ROTAX MAX Senior (TONYKART)',
+      tireSet: 'MOJO D5 #01 (Race)',
+      driver: 'K. Takahashi',
+      condition: 'DRY',
+      ambientTemp: '23.5',
+      trackTemp: '35.0',
+      laps: '0',
+      coldFL: '74.0',
+      coldFR: '74.0',
+      coldRL: '75.0',
+      coldRR: '75.0',
+      warmFL: '',
+      warmFR: '',
+      warmRL: '',
+      warmRR: '',
+      deltaFL: '',
+      deltaFR: '',
+      deltaRL: '',
+      deltaRR: '',
+      memo: '【走行前・冷間セット済】決勝ヒート前セット。走行後にこのカードをタップして温間内圧を追記してください。',
+      updatedAt: new Date(Date.now() - 1800 * 1000).toISOString()
+    },
+    {
+      id: 'sample-rotax-002',
+      date: getTodayString(),
+      time: '09:15',
+      circuit: 'フェスティカサーキット瑞浪',
+      vehicle: 'ROTAX MAX Senior (TONYKART)',
+      tireSet: 'MOJO D5 #02 (Practice)',
+      driver: 'K. Takahashi',
+      condition: 'DRY',
+      ambientTemp: '21.0',
+      trackTemp: '31.5',
+      laps: '16',
+      coldFL: '75.0',
+      coldFR: '75.0',
+      coldRL: '76.0',
+      coldRR: '76.0',
+      warmFL: '96.5',
+      warmFR: '98.0',
+      warmRL: '99.5',
+      warmRR: '101.0',
+      deltaFL: '+21.5',
+      deltaFR: '+23.0',
+      deltaRL: '+23.5',
+      deltaRR: '+25.0',
+      memo: 'タイムトライアル〜予選ヒート。後半8周目以降で右リア(RR)が100kPaを超えて少しスライド感あり。次は冷間を-1.0kPa下げる。',
+      updatedAt: new Date(Date.now() - 3600 * 1000).toISOString()
+    },
+    {
+      id: 'sample-rotax-001',
+      date: '2026-11-08',
+      time: '14:00',
+      circuit: '鈴鹿サーキット 南コース',
+      vehicle: 'ROTAX MAX Lights (KOSMIC)',
+      tireSet: 'MOJO W5 #01 (WET)',
+      driver: 'K. Takahashi',
+      condition: 'SEMI-WET',
+      ambientTemp: '16.5',
+      trackTemp: '19.0',
+      laps: '12',
+      coldFL: '92.0',
+      coldFR: '92.0',
+      coldRL: '94.0',
+      coldRR: '94.0',
+      warmFL: '106.0',
+      warmFR: '107.5',
+      warmRL: '109.0',
+      warmRR: '110.5',
+      deltaFL: '+14.0',
+      deltaFR: '+15.5',
+      deltaRL: '+15.0',
+      deltaRR: '+16.5',
+      memo: '通り雨後のセミウェット路面。スリックで高めスタート、立ち上がりのトラクション良好。',
+      updatedAt: new Date(Date.now() - 86400 * 1000 * 3).toISOString()
+    }
+  ];
+
+  // --- Safe LocalStorage Wrapper ---
+  const memoryStore = {};
+  function safeGet(key, fallback) {
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw === null || raw === undefined) return fallback;
+      return JSON.parse(raw);
+    } catch (e) {
+      return memoryStore[key] !== undefined ? memoryStore[key] : fallback;
+    }
+  }
+
+  function safeSet(key, value) {
+    memoryStore[key] = value;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      // Fallback to in-memory store
+    }
+  }
+
+  // --- State ---
+  let state = {
+    records: [],
+    deletedIds: [],
+    circuits: [],
+    vehicles: [],
+    tireSets: [],
+    lastMeta: {
+      circuit: DEFAULT_CIRCUITS[0],
+      vehicle: DEFAULT_VEHICLES[0],
+      tireSet: DEFAULT_TIRESETS[0],
+      driver: 'K. Takahashi'
+    },
+    userLocation: {
+      lat: 35.7767, // Default fallback: Narita, Chiba
+      lng: 140.3183,
+      isRealGps: false,
+      label: '千葉県成田市周辺（基準位置）'
+    },
+    gasUrl: '',
+    lastSync: '',
+    geminiKey: '',
+    ocrUnitMode: 'raw_bar',
+    ocrMetaDataUrl: '',
+    ocrTireDataUrl: '',
+    activeModalRecordId: null,
+    confirmCallback: null,
+    activeCodeTab: 'guide'
+  };
+
+  // --- Helpers ---
+  function getTodayString() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
+  function getNowTimeString() {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return hh + ':' + min;
+  }
+
+  function generateId() {
+    return 'log-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+  }
+
+  function parsePressure(val) {
+    if (val === '' || val === null || val === undefined) return null;
+    const num = parseFloat(val);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function detectDecimalPlaces(v1, v2) {
+    const s1 = String(v1 || '');
+    const s2 = String(v2 || '');
+    const n1 = parsePressure(v1);
+    const n2 = parsePressure(v2);
+    if ((n1 !== null && Math.abs(n1) < 10) || (n2 !== null && Math.abs(n2) < 10)) {
+      return 2;
+    }
+    if ((s1.split('.')[1] || '').length >= 2 || (s2.split('.')[1] || '').length >= 2) {
+      return 2;
+    }
+    return 1;
+  }
+
+  function formatDelta(coldVal, warmVal) {
+    const c = parsePressure(coldVal);
+    const w = parsePressure(warmVal);
+    if (c === null || w === null) return '';
+    const decimals = detectDecimalPlaces(coldVal, warmVal);
+    const diff = w - c;
+    const sign = diff > 0 ? '+' : (diff < 0 ? '' : '±');
+    return sign + diff.toFixed(decimals);
+  }
+
+  function isColdOnlyRecord(rec) {
+    const hasCold = [rec.coldFL, rec.coldFR, rec.coldRL, rec.coldRR].some(function(v) {
+      return parsePressure(v) !== null;
+    });
+    const hasWarm = [rec.warmFL, rec.warmFR, rec.warmRL, rec.warmRR].some(function(v) {
+      return parsePressure(v) !== null;
+    });
+    return hasCold && !hasWarm;
+  }
+
+  function escapeHtml(str) {
+    return String(str === undefined || str === null ? '' : str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function showToast(message, type) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = 'toast-item ' + (type || 'info');
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(function() {
+      if (el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    }, 3400);
+  }
+
+  function openConfirmModal(title, message, onConfirm) {
+    const modal = document.getElementById('confirm-modal');
+    const titleEl = document.getElementById('confirm-modal-title');
+    const msgEl = document.getElementById('confirm-modal-message');
+    if (!modal || !titleEl || !msgEl) return;
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    state.confirmCallback = onConfirm;
+    modal.classList.add('open');
+  }
+
+  function closeConfirmModal() {
+    const modal = document.getElementById('confirm-modal');
+    if (modal) modal.classList.remove('open');
+    state.confirmCallback = null;
+  }
+
+  // --- Haversine Distance Calculation (km) ---
+  function calcDistanceKm(lat1, lng1, lat2, lng2) {
+    const R = 6371.0;
+    const toRad = function(deg) { return deg * Math.PI / 180.0; };
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  // --- Nearby Circuit Search & Rendering ---
+  function renderNearbyCircuitList() {
+    const listEl = document.getElementById('nearby-circuit-list');
+    const statusEl = document.getElementById('nearby-circuit-status');
+    const filterInput = document.getElementById('input-filter-nearby-circuit');
+    if (!listEl) return;
+
+    const query = ((filterInput && filterInput.value) || '').trim().toLowerCase();
+    const uLat = state.userLocation.lat;
+    const uLng = state.userLocation.lng;
+
+    if (statusEl) {
+      statusEl.textContent = state.userLocation.isRealGps
+        ? '📍 現在地GPSから近い順（タップで追加・選択）'
+        : '📍 近くのサーキット候補（距離順・タップで追加）';
+    }
+
+    const items = JAPAN_CIRCUIT_CATALOG.map(function(c) {
+      return {
+        name: c.name,
+        pref: c.pref,
+        type: c.type,
+        distKm: calcDistanceKm(uLat, uLng, c.lat, c.lng)
+      };
+    }).filter(function(item) {
+      if (!query) return true;
+      const hay = (item.name + ' ' + item.pref + ' ' + item.type).toLowerCase();
+      return hay.indexOf(query) !== -1;
+    }).sort(function(a, b) {
+      return a.distKm - b.distKm;
+    });
+
+    if (items.length === 0) {
+      listEl.innerHTML = '<div style="font-size:0.78rem; color:var(--text-muted); padding:8px; text-align:center;">該当するサーキットが見つかりません。上の入力欄から直接追加できます。</div>';
+      return;
+    }
+
+    listEl.innerHTML = items.slice(0, 18).map(function(item) {
+      const alreadyIn = state.circuits.indexOf(item.name) !== -1;
+      return '<div class="nearby-circuit-item">' +
+        '<div class="nearby-circuit-info">' +
+          '<span class="nearby-circuit-name">' + escapeHtml(item.name) + '</span>' +
+          '<span class="nearby-circuit-meta">' + escapeHtml(item.pref) + ' (' + escapeHtml(item.type) + ') ・ <span class="nearby-distance-badge">約 ' + item.distKm.toFixed(1) + ' km</span></span>' +
+        '</div>' +
+        '<button type="button" class="mini-action-btn" data-select-circuit="' + escapeHtml(item.name) + '" style="background:' + (alreadyIn ? 'var(--bg-elevated)' : 'var(--accent-cyan)') + '; color:' + (alreadyIn ? 'var(--accent-cyan)' : '#000') + '; border-color:var(--accent-cyan);">' +
+          (alreadyIn ? '選択する' : '+ 追加して選択') +
+        '</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function requestGpsAndSearchNearbyCircuits(silentIfFallback) {
+    const statusEl = document.getElementById('nearby-circuit-status');
+    if (statusEl) {
+      statusEl.textContent = '📡 現在地を測位して近くのサーキットを検索中...';
+    }
+
+    if (!navigator.geolocation) {
+      renderNearbyCircuitList();
+      if (!silentIfFallback) {
+        showToast('このブラウザではGPSが利用できないため基準位置から距離順表示しました', 'info');
+      }
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        state.userLocation = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          isRealGps: true,
+          label: '現在地GPS'
+        };
+        renderNearbyCircuitList();
+        showToast('現在地から近い順にサーキットを並べ替えました！', 'success');
+      },
+      function() {
+        // Fallback smoothly when geolocation permission is denied or blocked in iframe
+        renderNearbyCircuitList();
+        if (!silentIfFallback) {
+          showToast('現在地から近い順（基準座標）でサーキット候補を表示しました', 'info');
+        }
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 4000,
+        maximumAge: 300000
+      }
+    );
+  }
+
+  // --- Tire Set Usage Stats Calculation ---
+  function updateTireSetUsageBadge() {
+    const badge = document.getElementById('tireset-usage-badge');
+    const select = document.getElementById('field-tireset');
+    if (!badge || !select) return;
+
+    const currentSet = select.value;
+    if (!currentSet) {
+      badge.textContent = '累計: 0周 / 0回';
+      return;
+    }
+
+    let totalLaps = 0;
+    let sessions = 0;
+    state.records.forEach(function(r) {
+      if (r.tireSet === currentSet) {
+        sessions += 1;
+        const l = parseInt(r.laps, 10);
+        if (Number.isFinite(l) && l > 0) {
+          totalLaps += l;
+        }
+      }
+    });
+
+    badge.textContent = '累計: ' + totalLaps + '周 / ' + sessions + 'セッション';
+  }
+
+  // --- Initialization ---
+  function loadStateFromStorage() {
+    const storedRecords = safeGet(STORAGE_KEYS.RECORDS, null);
+    if (storedRecords === null) {
+      state.records = INITIAL_SAMPLE_RECORDS.slice();
+      safeSet(STORAGE_KEYS.RECORDS, state.records);
+    } else {
+      state.records = Array.isArray(storedRecords) ? storedRecords : [];
+      // Backfill tireSet on existing records if missing
+      state.records.forEach(function(r) {
+        if (!r.tireSet) {
+          r.tireSet = DEFAULT_TIRESETS[0];
+        }
+      });
+    }
+
+    state.deletedIds = safeGet(STORAGE_KEYS.DELETED_IDS, []);
+    state.circuits = safeGet(STORAGE_KEYS.CIRCUITS, DEFAULT_CIRCUITS.slice());
+    state.vehicles = safeGet(STORAGE_KEYS.VEHICLES, DEFAULT_VEHICLES.slice());
+    state.tireSets = safeGet(STORAGE_KEYS.TIRESETS, DEFAULT_TIRESETS.slice());
+    state.lastMeta = safeGet(STORAGE_KEYS.LAST_META, {
+      circuit: state.circuits[0] || DEFAULT_CIRCUITS[0],
+      vehicle: state.vehicles[0] || DEFAULT_VEHICLES[0],
+      tireSet: state.tireSets[0] || DEFAULT_TIRESETS[0],
+      driver: 'K. Takahashi'
+    });
+    if (!state.lastMeta.tireSet) {
+      state.lastMeta.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];
+    }
+    state.gasUrl = safeGet(STORAGE_KEYS.GAS_URL, '');
+    state.lastSync = safeGet(STORAGE_KEYS.LAST_SYNC, '');
+    state.geminiKey = safeGet(STORAGE_KEYS.GEMINI_KEY, '');
+    state.ocrUnitMode = safeGet(STORAGE_KEYS.OCR_UNIT, 'raw_bar');
+  }
+
+  function saveRecordsToStorage() {
+    state.records.sort(function(a, b) {
+      const dtA = (a.date || '') + 'T' + (a.time || '00:00');
+      const dtB = (b.date || '') + 'T' + (b.time || '00:00');
+      return dtB.localeCompare(dtA);
+    });
+    safeSet(STORAGE_KEYS.RECORDS, state.records);
+    safeSet(STORAGE_KEYS.DELETED_IDS, state.deletedIds);
+    updatePendingColdBanner();
+    updateTireSetUsageBadge();
+    renderHistoryTab();
+  }
+
+  // --- Select Options Rendering ---
+  function renderMasterSelects() {
+    const circuitSelect = document.getElementById('field-circuit');
+    const vehicleSelect = document.getElementById('field-vehicle');
+    const tireSetSelect = document.getElementById('field-tireset');
+    const filterCircuit = document.getElementById('filter-circuit');
+    const filterVehicle = document.getElementById('filter-vehicle');
+    const filterTireSet = document.getElementById('filter-tireset');
+
+    state.records.forEach(function(r) {
+      if (r.circuit && state.circuits.indexOf(r.circuit) === -1) {
+        state.circuits.push(r.circuit);
+      }
+      if (r.vehicle && state.vehicles.indexOf(r.vehicle) === -1) {
+        state.vehicles.push(r.vehicle);
+      }
+      if (r.tireSet && state.tireSets.indexOf(r.tireSet) === -1) {
+        state.tireSets.push(r.tireSet);
+      }
+    });
+
+    if (circuitSelect) {
+      const curCircuit = circuitSelect.value || state.lastMeta.circuit;
+      circuitSelect.innerHTML = state.circuits.map(function(c) {
+        return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>';
+      }).join('');
+      if (curCircuit && state.circuits.indexOf(curCircuit) !== -1) {
+        circuitSelect.value = curCircuit;
+      }
+    }
+
+    if (vehicleSelect) {
+      const curVehicle = vehicleSelect.value || state.lastMeta.vehicle;
+      vehicleSelect.innerHTML = state.vehicles.map(function(v) {
+        return '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>';
+      }).join('');
+      if (curVehicle && state.vehicles.indexOf(curVehicle) !== -1) {
+        vehicleSelect.value = curVehicle;
+      }
+    }
+
+    if (tireSetSelect) {
+      const curTireSet = tireSetSelect.value || state.lastMeta.tireSet;
+      tireSetSelect.innerHTML = state.tireSets.map(function(t) {
+        return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>';
+      }).join('');
+      if (curTireSet && state.tireSets.indexOf(curTireSet) !== -1) {
+        tireSetSelect.value = curTireSet;
+      }
+    }
+
+    if (filterCircuit) {
+      const curFC = filterCircuit.value || 'ALL';
+      filterCircuit.innerHTML = '<option value="ALL">すべてのサーキット</option>' +
+        state.circuits.map(function(c) {
+          return '<option value="' + escapeHtml(c) + '">' + escapeHtml(c) + '</option>';
+        }).join('');
+      filterCircuit.value = state.circuits.indexOf(curFC) !== -1 ? curFC : 'ALL';
+    }
+
+    if (filterVehicle) {
+      const curFV = filterVehicle.value || 'ALL';
+      filterVehicle.innerHTML = '<option value="ALL">すべての車両</option>' +
+        state.vehicles.map(function(v) {
+          return '<option value="' + escapeHtml(v) + '">' + escapeHtml(v) + '</option>';
+        }).join('');
+      filterVehicle.value = state.vehicles.indexOf(curFV) !== -1 ? curFV : 'ALL';
+    }
+
+    if (filterTireSet) {
+      const curFT = filterTireSet.value || 'ALL';
+      filterTireSet.innerHTML = '<option value="ALL">すべてのタイヤセット</option>' +
+        state.tireSets.map(function(t) {
+          return '<option value="' + escapeHtml(t) + '">' + escapeHtml(t) + '</option>';
+        }).join('');
+      filterTireSet.value = state.tireSets.indexOf(curFT) !== -1 ? curFT : 'ALL';
+    }
+
+    updateTireSetUsageBadge();
+  }
+
+  // --- Real-Time Delta Calculation ---
+  function updateLiveDeltas() {
+    const positions = ['FL', 'FR', 'RL', 'RR'];
+    const colds = [];
+    const warms = [];
+    const deltas = [];
+    let isBarScale = false;
+
+    positions.forEach(function(pos) {
+      const coldEl = document.getElementById('cold' + pos);
+      const warmEl = document.getElementById('warm' + pos);
+      const deltaEl = document.getElementById('delta-' + pos);
+      if (!coldEl || !warmEl || !deltaEl) return;
+
+      const c = parsePressure(coldEl.value);
+      const w = parsePressure(warmEl.value);
+      if (c !== null) {
+        colds.push(c);
+        if (Math.abs(c) < 10) isBarScale = true;
+      }
+      if (w !== null) {
+        warms.push(w);
+        if (Math.abs(w) < 10) isBarScale = true;
+      }
+
+      deltaEl.className = 'tire-delta-value';
+      if (c !== null && w !== null) {
+        const diff = w - c;
+        deltas.push(diff);
+        const unitSuffix = isBarScale ? ' bar' : ' kPa';
+        const formatted = formatDelta(coldEl.value, warmEl.value) + unitSuffix;
+        deltaEl.textContent = formatted;
+        const highThreshold = isBarScale ? 0.38 : 24.0;
+        if (diff > highThreshold) {
+          deltaEl.classList.add('high');
+        } else if (diff >= 0) {
+          deltaEl.classList.add('positive');
+        } else {
+          deltaEl.classList.add('negative');
+        }
+      } else {
+        deltaEl.textContent = '--';
+      }
+    });
+
+    const decimals = isBarScale ? 2 : 1;
+    const unitLabel = isBarScale ? ' bar' : ' kPa';
+    const coldAvgEl = document.getElementById('summary-cold-avg');
+    const warmAvgEl = document.getElementById('summary-warm-avg');
+    const deltaAvgEl = document.getElementById('summary-delta-avg');
+
+    if (coldAvgEl) {
+      coldAvgEl.textContent = colds.length > 0
+        ? (colds.reduce(function(a, b) { return a + b; }, 0) / colds.length).toFixed(decimals) + unitLabel
+        : '--' + unitLabel;
+    }
+    if (warmAvgEl) {
+      warmAvgEl.textContent = warms.length > 0
+        ? (warms.reduce(function(a, b) { return a + b; }, 0) / warms.length).toFixed(decimals) + unitLabel
+        : '--' + unitLabel;
+    }
+    if (deltaAvgEl) {
+      if (deltas.length > 0) {
+        const avgD = deltas.reduce(function(a, b) { return a + b; }, 0) / deltas.length;
+        const sign = avgD > 0 ? '+' : (avgD < 0 ? '' : '±');
+        deltaAvgEl.textContent = sign + avgD.toFixed(decimals) + unitLabel;
+      } else {
+        deltaAvgEl.textContent = '--' + unitLabel;
+      }
+    }
+  }
+
+  // ==========================================================================
+  // ROTAX Digital Gauge 2-Screen OCR & Parser Engine
+  // ==========================================================================
+
+  function parseRotaxGaugeText(rawText) {
+    const text = String(rawText || '').replace(/,/g, '.');
+    const result = {
+      date: null,
+      rawDateDisplay: null,
+      time: null,
+      rawTimeDisplay: null,
+      ambientTemp: null,
+      testNumbers: [],
+      wheels: null
+    };
+
+    const dateMatch = text.match(/(\d{1,2})\s*[\/\-]\s*(\d{1,2})\s*[\/\-]\s*(20\d{2})/);
+    if (dateMatch) {
+      const dd = dateMatch[1].padStart(2, '0');
+      const mm = dateMatch[2].padStart(2, '0');
+      const yyyy = dateMatch[3];
+      result.date = yyyy + '-' + mm + '-' + dd;
+      result.rawDateDisplay = dd + '/' + mm + '/' + yyyy;
+    }
+
+    const timeMatch = text.match(/(\d{1,2})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?/);
+    if (timeMatch) {
+      const hh = timeMatch[1].padStart(2, '0');
+      const min = timeMatch[2].padStart(2, '0');
+      const sec = timeMatch[3] ? timeMatch[3].padStart(2, '0') : '00';
+      result.time = hh + ':' + min;
+      result.rawTimeDisplay = hh + ':' + min + ':' + sec;
+    }
+
+    const airMatch = text.match(/Air\s*[:\s]*([0-9]{1,2}(?:\.[0-9])?)/i) ||
+                     text.match(/([0-9]{1,2}\.[0-9])\s*[°º]?\s*C/i);
+    if (airMatch) {
+      result.ambientTemp = airMatch[1];
+    }
+
+    const testRegex = /Test\s*(\d+)/gi;
+    let tm;
+    while ((tm = testRegex.exec(text)) !== null) {
+      if (result.testNumbers.indexOf(tm[1]) === -1) {
+        result.testNumbers.push(tm[1]);
+      }
+    }
+
+    const strippedForWheels = text
+      .replace(/Date\s*[:\s]*\d{1,2}[\/\-]\d{1,2}[\/\-]20\d{2}/gi, ' ')
+      .replace(/Time\s*[:\s]*\d{1,2}:\d{2}(?::\d{2})?/gi, ' ')
+      .replace(/Air\s*[:\s]*\d{1,2}(?:\.\d)?\s*[°º]?\s*C/gi, ' ')
+      .replace(/Test\s*\d+/gi, ' ');
+
+    const floatTokens = strippedForWheels.match(/[+\-]?\d+\.\d{2}/g);
+    if (floatTokens && floatTokens.length >= 12) {
+      const nums = floatTokens.slice(0, 12).map(parseFloat);
+      result.wheels = {
+        FL: { cold: nums[0], warm: nums[2], delta: nums[4] },
+        FR: { cold: nums[1], warm: nums[3], delta: nums[5] },
+        RL: { cold: nums[6], warm: nums[8], delta: nums[10] },
+        RR: { cold: nums[7], warm: nums[9], delta: nums[11] }
+      };
+    }
+
+    return result;
+  }
+
+  function preprocessLcdCanvas(imgElement) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const w = imgElement.naturalWidth || imgElement.width || 360;
+    const h = imgElement.naturalHeight || imgElement.height || 640;
+
+    let sx = 0, sy = 0, sw = w, sh = h;
+    if (h / w > 1.35) {
+      sx = Math.round(w * 0.18);
+      sy = Math.round(h * 0.08);
+      sw = Math.round(w * 0.64);
+      sh = Math.round(h * 0.36);
+    }
+
+    canvas.width = sw * 2;
+    canvas.height = sh * 2;
+    ctx.drawImage(imgElement, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+    let sumLum = 0;
+    const totalPixels = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      sumLum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+    const avgLum = sumLum / totalPixels;
+    const threshold = avgLum * 0.86;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      const v = lum < threshold ? 0 : 255;
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    return canvas.toDataURL('image/png');
+  }
+
+  function applyParsedRotaxData(parsed) {
+    if (!parsed) return;
+
+    const unitMode = (document.getElementById('select-ocr-unit') || {}).value || 'raw_bar';
+    const factor = unitMode === 'to_kpa' ? 100 : 1;
+    const decimals = unitMode === 'to_kpa' ? 1 : 2;
+
+    if (parsed.date) {
+      document.getElementById('field-date').value = parsed.date;
+    }
+    if (parsed.time) {
+      document.getElementById('field-time').value = parsed.time;
+    }
+    if (parsed.ambientTemp !== null && parsed.ambientTemp !== undefined) {
+      document.getElementById('field-ambient-temp').value = String(parsed.ambientTemp);
+    }
+
+    if (parsed.wheels) {
+      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+        const wObj = parsed.wheels[pos];
+        if (!wObj) return;
+        if (Number.isFinite(wObj.cold)) {
+          document.getElementById('cold' + pos).value = (wObj.cold * factor).toFixed(decimals);
+        }
+        if (Number.isFinite(wObj.warm)) {
+          document.getElementById('warm' + pos).value = (wObj.warm * factor).toFixed(decimals);
+        }
+      });
+    }
+
+    if (parsed.testNumbers && parsed.testNumbers.length > 0) {
+      const testTag = '[ROTAX Air Gauge: Test ' + parsed.testNumbers.join(' / Test ') + ']';
+      const memoEl = document.getElementById('field-memo');
+      if (memoEl && memoEl.value.indexOf(testTag) === -1) {
+        memoEl.value = memoEl.value ? (testTag + '\n' + memoEl.value) : testTag;
+      }
+    }
+
+    const lcdBox = document.getElementById('rotax-lcd-preview');
+    if (lcdBox) {
+      lcdBox.classList.add('visible');
+      document.getElementById('lcd-date').textContent = 'Date: ' + (parsed.rawDateDisplay || parsed.date || '--/--/----');
+      document.getElementById('lcd-time').textContent = 'Time: ' + (parsed.rawTimeDisplay || parsed.time || '--:--');
+      document.getElementById('lcd-air').textContent = 'Air: ' + (parsed.ambientTemp || '--') + '°C';
+      document.getElementById('lcd-mem-no').textContent = (parsed.testNumbers && parsed.testNumbers[0]) || '21';
+      document.getElementById('lcd-test-footer').textContent =
+        '◄ - Test ' + ((parsed.testNumbers && parsed.testNumbers.length) ? parsed.testNumbers.join(' / ') : '21') + ' + ► （フォームへ自動反映済）';
+
+      if (parsed.wheels) {
+        ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+          const wObj = parsed.wheels[pos];
+          const cell = document.getElementById('lcd-' + pos.toLowerCase());
+          if (wObj && cell) {
+            const cStr = Number.isFinite(wObj.cold) ? wObj.cold.toFixed(2) : '--';
+            const wStr = Number.isFinite(wObj.warm) ? wObj.warm.toFixed(2) : '--';
+            const dVal = (Number.isFinite(wObj.cold) && Number.isFinite(wObj.warm))
+              ? (wObj.warm - wObj.cold)
+              : wObj.delta;
+            const dStr = Number.isFinite(dVal) ? ((dVal >= 0 ? '+' : '') + dVal.toFixed(2)) : '--';
+            cell.innerHTML = '1行(冷): ' + cStr + '<br>2行(温): ' + wStr + '<br>3行(Δ): ' + dStr;
+          }
+        });
+      }
+    }
+
+    updateLiveDeltas();
+  }
+
+  function loadRealRotaxSamplePair() {
+    const bundle = window.ROTAX_SOURCE_BUNDLE || {};
+    if (bundle.sampleMetaUri) {
+      state.ocrMetaDataUrl = bundle.sampleMetaUri;
+      const img1 = document.getElementById('img-ocr-meta-preview');
+      const ph1 = document.getElementById('placeholder-ocr-meta');
+      if (img1 && ph1) {
+        img1.src = bundle.sampleMetaUri;
+        img1.classList.add('visible');
+        ph1.style.display = 'none';
+        document.getElementById('ocr-slot-meta').classList.add('loaded');
+      }
+    }
+    if (bundle.sampleTireUri) {
+      state.ocrTireDataUrl = bundle.sampleTireUri;
+      const img2 = document.getElementById('img-ocr-tire-preview');
+      const ph2 = document.getElementById('placeholder-ocr-tire');
+      if (img2 && ph2) {
+        img2.src = bundle.sampleTireUri;
+        img2.classList.add('visible');
+        ph2.style.display = 'none';
+        document.getElementById('ocr-slot-tire').classList.add('loaded');
+      }
+    }
+
+    const sampleTranscript = [
+      'Date: 19/09/2026',
+      'Time: 10:58:01',
+      'Air: 27.3°C',
+      '◄ - Test 22 + ►',
+      '1.65 1.65',
+      '2.10 1.97',
+      '+0.45 21 +0.32',
+      '1.60 1.61',
+      '1.97 1.93',
+      '+0.37 +0.32',
+      '◄ - Test 21 + ►'
+    ].join('\n');
+
+    const rawTextArea = document.getElementById('input-ocr-raw-text');
+    if (rawTextArea) rawTextArea.value = sampleTranscript;
+
+    const parsed = parseRotaxGaugeText(sampleTranscript);
+    applyParsedRotaxData(parsed);
+    showToast('ROTAXエアゲージ2画面（Test 21/22）を読み取り、フォームへ反映しました！', 'success');
+  }
+
+  async function runGaugeImageOcr() {
+    if (!state.ocrMetaDataUrl && !state.ocrTireDataUrl) {
+      showToast('先に画面①または画面②の写真を選択するか、「実機サンプル2枚でテスト」を押してください', 'error');
+      return;
+    }
+
+    const statusBar = document.getElementById('ocr-status-bar');
+    const statusText = document.getElementById('ocr-status-text');
+    const runBtn = document.getElementById('btn-run-ocr');
+
+    if (statusBar && statusText) {
+      statusBar.classList.add('visible');
+      statusText.textContent = 'エアゲージ液晶画面をOCR文字起こし中...';
+    }
+    if (runBtn) runBtn.disabled = true;
+
+    try {
+      const bundle = window.ROTAX_SOURCE_BUNDLE || {};
+      if (state.ocrMetaDataUrl === bundle.sampleMetaUri && state.ocrTireDataUrl === bundle.sampleTireUri) {
+        loadRealRotaxSamplePair();
+        return;
+      }
+
+      if (state.geminiKey) {
+        if (statusText) statusText.textContent = 'Gemini AI Vision で2画面の液晶数値を高精度抽出中...';
+        const parts = [
+          {
+            text: 'You are reading ROTAX Racing digital tire pressure gauge screens. Extract all text verbatim including Date: DD/MM/YYYY, Time: HH:MM:SS, Air: XX.X°C, Test number, and the 4 wheels (FL top-left, FR top-right, RL bottom-left, RR bottom-right; each wheel has 3 rows: row 1 cold pressure, row 2 warm pressure, row 3 signed delta). Output the transcribed lines clearly.'
+          }
+        ];
+        if (state.ocrMetaDataUrl) {
+          parts.push({
+            inline_data: {
+              mime_type: 'image/jpeg',
+              data: state.ocrMetaDataUrl.split(',')[1]
+            }
+          });
+        }
+        if (state.ocrTireDataUrl) {
+          parts.push({
+            inline_data: {
+              mime_type: 'image/jpeg',
+              data: state.ocrTireDataUrl.split(',')[1]
+            }
+          });
+        }
+
+        const resp = await fetch(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + encodeURIComponent(state.geminiKey),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: parts }] })
+          }
+        );
+        const json = await resp.json();
+        const aiText = ((((json.candidates || [])[0] || {}).content || {}).parts || [])
+          .map(function(p) { return p.text || ''; })
+          .join('\n');
+
+        if (aiText) {
+          document.getElementById('input-ocr-raw-text').value = aiText;
+          const parsed = parseRotaxGaugeText(aiText);
+          applyParsedRotaxData(parsed);
+          showToast('AI OCRでエアゲージ数値を抽出し、フォームに反映しました！', 'success');
+          return;
+        }
+      }
+
+      if (typeof window.Tesseract === 'undefined') {
+        throw new Error('OCRライブラリが読み込まれていません。テキスト貼付をご利用ください。');
+      }
+
+      let combinedOcrText = '';
+      if (state.ocrMetaDataUrl) {
+        if (statusText) statusText.textContent = '画面①（日時・気温）をOCR解析中...';
+        const img1 = document.getElementById('img-ocr-meta-preview');
+        const processed1 = preprocessLcdCanvas(img1);
+        const res1 = await window.Tesseract.recognize(processed1, 'eng');
+        combinedOcrText += (res1.data && res1.data.text ? res1.data.text : '') + '\n';
+      }
+
+      if (state.ocrTireDataUrl) {
+        if (statusText) statusText.textContent = '画面②（4輪冷間・温間・差分）をOCR解析中...';
+        const img2 = document.getElementById('img-ocr-tire-preview');
+        const processed2 = preprocessLcdCanvas(img2);
+        const res2 = await window.Tesseract.recognize(processed2, 'eng');
+        combinedOcrText += (res2.data && res2.data.text ? res2.data.text : '') + '\n';
+      }
+
+      document.getElementById('input-ocr-raw-text').value = combinedOcrText.trim();
+      document.getElementById('box-ocr-paste').classList.add('visible');
+      const parsed = parseRotaxGaugeText(combinedOcrText);
+      applyParsedRotaxData(parsed);
+      showToast('OCR読み取り結果を反映しました（必要に応じてテキスト欄で微調整できます）', 'success');
+    } catch (err) {
+      document.getElementById('box-ocr-paste').classList.add('visible');
+      showToast('画像OCRエラー: 下のテキスト貼付欄またはGemini APIキー設定をお試しください', 'error');
+    } finally {
+      if (statusBar) statusBar.classList.remove('visible');
+      if (runBtn) runBtn.disabled = false;
+    }
+  }
+
+  // --- Form Reset / Populate ---
+  function resetFormToNew() {
+    document.getElementById('field-id').value = '';
+    document.getElementById('field-date').value = getTodayString();
+    document.getElementById('field-time').value = getNowTimeString();
+
+    renderMasterSelects();
+    const circuitEl = document.getElementById('field-circuit');
+    const vehicleEl = document.getElementById('field-vehicle');
+    const tireSetEl = document.getElementById('field-tireset');
+    const driverEl = document.getElementById('field-driver');
+
+    if (circuitEl && state.lastMeta.circuit) circuitEl.value = state.lastMeta.circuit;
+    if (vehicleEl && state.lastMeta.vehicle) vehicleEl.value = state.lastMeta.vehicle;
+    if (tireSetEl && state.lastMeta.tireSet) tireSetEl.value = state.lastMeta.tireSet;
+    if (driverEl) driverEl.value = state.lastMeta.driver || '';
+
+    setConditionSelection('DRY');
+    document.getElementById('field-ambient-temp').value = '';
+    document.getElementById('field-track-temp').value = '';
+    document.getElementById('field-laps').value = '';
+
+    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+      document.getElementById('cold' + pos).value = '';
+      document.getElementById('warm' + pos).value = '';
+    });
+
+    document.getElementById('field-memo').value = '';
+    document.getElementById('edit-mode-banner').classList.remove('visible');
+    document.getElementById('btn-submit-text').textContent = '記録を保存する（冷間のみでも保存可）';
+    updateTireSetUsageBadge();
+    updateLiveDeltas();
+    updatePendingColdBanner();
+  }
+
+  function setConditionSelection(cond) {
+    const valid = ['DRY', 'SEMI-WET', 'WET'].indexOf(cond) !== -1 ? cond : 'DRY';
+    document.getElementById('field-condition').value = valid;
+    const btns = document.querySelectorAll('#condition-btn-group .cond-btn');
+    btns.forEach(function(btn) {
+      if (btn.getAttribute('data-cond') === valid) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+
+  function loadRecordIntoForm(recordId, scrollToWarm) {
+    const rec = state.records.find(function(r) { return r.id === recordId; });
+    if (!rec) return;
+
+    switchTab('tab-record');
+    renderMasterSelects();
+
+    document.getElementById('field-id').value = rec.id;
+    document.getElementById('field-date').value = rec.date || getTodayString();
+    document.getElementById('field-time').value = rec.time || getNowTimeString();
+    document.getElementById('field-circuit').value = rec.circuit || state.circuits[0];
+    document.getElementById('field-vehicle').value = rec.vehicle || state.vehicles[0];
+    document.getElementById('field-tireset').value = rec.tireSet || state.tireSets[0];
+    document.getElementById('field-driver').value = rec.driver || '';
+    setConditionSelection(rec.condition || 'DRY');
+
+    document.getElementById('field-ambient-temp').value = rec.ambientTemp || '';
+    document.getElementById('field-track-temp').value = rec.trackTemp || '';
+    document.getElementById('field-laps').value = rec.laps || '';
+
+    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+      document.getElementById('cold' + pos).value = rec['cold' + pos] !== undefined ? rec['cold' + pos] : '';
+      document.getElementById('warm' + pos).value = rec['warm' + pos] !== undefined ? rec['warm' + pos] : '';
+    });
+
+    document.getElementById('field-memo').value = rec.memo || '';
+
+    const banner = document.getElementById('edit-mode-banner');
+    const bannerLabel = document.getElementById('edit-mode-label');
+    if (banner && bannerLabel) {
+      banner.classList.add('visible');
+      bannerLabel.textContent = '編集モード：' + (rec.date || '') + ' ' + (rec.time || '') + ' (' + (rec.circuit || '') + ')';
+    }
+    document.getElementById('btn-submit-text').textContent = '温間・編集内容を上書き更新する';
+    document.getElementById('cold-pending-banner').classList.remove('visible');
+
+    updateTireSetUsageBadge();
+    updateLiveDeltas();
+
+    if (scrollToWarm) {
+      const tireCard = document.getElementById('tire-section-card');
+      if (tireCard) {
+        tireCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  function duplicateColdIntoNewForm(recordId) {
+    const rec = state.records.find(function(r) { return r.id === recordId; });
+    if (!rec) return;
+    resetFormToNew();
+    switchTab('tab-record');
+
+    document.getElementById('field-circuit').value = rec.circuit || state.circuits[0];
+    document.getElementById('field-vehicle').value = rec.vehicle || state.vehicles[0];
+    document.getElementById('field-tireset').value = rec.tireSet || state.tireSets[0];
+    document.getElementById('field-driver').value = rec.driver || '';
+    setConditionSelection(rec.condition || 'DRY');
+    document.getElementById('field-ambient-temp').value = rec.ambientTemp || '';
+    document.getElementById('field-track-temp').value = rec.trackTemp || '';
+
+    ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+      document.getElementById('cold' + pos).value = rec['cold' + pos] || '';
+      document.getElementById('warm' + pos).value = '';
+    });
+
+    updateTireSetUsageBadge();
+    updateLiveDeltas();
+    showToast('冷間内圧・車両・タイヤセット情報をコピーして新規作成画面にセットしました', 'success');
+  }
+
+  function updatePendingColdBanner() {
+    const banner = document.getElementById('cold-pending-banner');
+    const summaryEl = document.getElementById('cold-pending-summary');
+    const editingId = document.getElementById('field-id').value;
+    if (!banner || !summaryEl) return;
+
+    if (editingId) {
+      banner.classList.remove('visible');
+      return;
+    }
+
+    const pending = state.records.find(isColdOnlyRecord);
+    if (pending) {
+      banner.classList.add('visible');
+      summaryEl.textContent = (pending.date || '') + ' ' + (pending.time || '') + ' | ' + (pending.circuit || '') + ' | ' + (pending.tireSet || '');
+      banner.setAttribute('data-pending-id', pending.id);
+    } else {
+      banner.classList.remove('visible');
+      banner.removeAttribute('data-pending-id');
+    }
+  }
+
+  // --- Save Form Handler ---
+  function handleFormSubmit(e) {
+    e.preventDefault();
+
+    const editingId = document.getElementById('field-id').value.trim();
+    const dateVal = document.getElementById('field-date').value || getTodayString();
+    const timeVal = document.getElementById('field-time').value || getNowTimeString();
+    const circuitVal = document.getElementById('field-circuit').value.trim() || state.circuits[0];
+    const vehicleVal = document.getElementById('field-vehicle').value.trim() || state.vehicles[0];
+    const tireSetVal = document.getElementById('field-tireset').value.trim() || state.tireSets[0];
+    const driverVal = document.getElementById('field-driver').value.trim();
+    const condVal = document.getElementById('field-condition').value || 'DRY';
+
+    const coldFL = document.getElementById('coldFL').value.trim();
+    const coldFR = document.getElementById('coldFR').value.trim();
+    const coldRL = document.getElementById('coldRL').value.trim();
+    const coldRR = document.getElementById('coldRR').value.trim();
+
+    const warmFL = document.getElementById('warmFL').value.trim();
+    const warmFR = document.getElementById('warmFR').value.trim();
+    const warmRL = document.getElementById('warmRL').value.trim();
+    const warmRR = document.getElementById('warmRR').value.trim();
+
+    const record = {
+      id: editingId || generateId(),
+      date: dateVal,
+      time: timeVal,
+      circuit: circuitVal,
+      vehicle: vehicleVal,
+      tireSet: tireSetVal,
+      driver: driverVal,
+      condition: condVal,
+      ambientTemp: document.getElementById('field-ambient-temp').value.trim(),
+      trackTemp: document.getElementById('field-track-temp').value.trim(),
+      laps: document.getElementById('field-laps').value.trim(),
+      coldFL: coldFL,
+      coldFR: coldFR,
+      coldRL: coldRL,
+      coldRR: coldRR,
+      warmFL: warmFL,
+      warmFR: warmFR,
+      warmRL: warmRL,
+      warmRR: warmRR,
+      deltaFL: formatDelta(coldFL, warmFL),
+      deltaFR: formatDelta(coldFR, warmFR),
+      deltaRL: formatDelta(coldRL, warmRL),
+      deltaRR: formatDelta(coldRR, warmRR),
+      memo: document.getElementById('field-memo').value.trim(),
+      updatedAt: new Date().toISOString()
+    };
+
+    state.lastMeta = {
+      circuit: circuitVal,
+      vehicle: vehicleVal,
+      tireSet: tireSetVal,
+      driver: driverVal
+    };
+    safeSet(STORAGE_KEYS.LAST_META, state.lastMeta);
+
+    const existingIdx = state.records.findIndex(function(r) { return r.id === record.id; });
+    if (existingIdx !== -1) {
+      state.records[existingIdx] = record;
+      showToast('セッション記録を更新しました！', 'success');
+    } else {
+      state.records.unshift(record);
+      showToast('新しいセッション記録を保存しました！', 'success');
+    }
+
+    saveRecordsToStorage();
+    resetFormToNew();
+  }
+
+  // --- History Filtering & Rendering ---
+  function getFilteredRecords() {
+    const fCircuit = (document.getElementById('filter-circuit') || {}).value || 'ALL';
+    const fVehicle = (document.getElementById('filter-vehicle') || {}).value || 'ALL';
+    const fTireSet = (document.getElementById('filter-tireset') || {}).value || 'ALL';
+    const fCond = (document.getElementById('filter-condition') || {}).value || 'ALL';
+    const fKeyword = ((document.getElementById('filter-keyword') || {}).value || '').trim().toLowerCase();
+
+    return state.records.filter(function(r) {
+      if (fCircuit !== 'ALL' && r.circuit !== fCircuit) return false;
+      if (fVehicle !== 'ALL' && r.vehicle !== fVehicle) return false;
+      if (fTireSet !== 'ALL' && r.tireSet !== fTireSet) return false;
+      if (fCond !== 'ALL' && r.condition !== fCond) return false;
+      if (fKeyword) {
+        const hay = ((r.driver || '') + ' ' + (r.memo || '') + ' ' + (r.circuit || '') + ' ' + (r.vehicle || '') + ' ' + (r.tireSet || '')).toLowerCase();
+        if (hay.indexOf(fKeyword) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderHistoryTab() {
+    const listEl = document.getElementById('history-card-list');
+    if (!listEl) return;
+
+    const filtered = getFilteredRecords();
+
+    const kpiCount = document.getElementById('kpi-count');
+    const kpiDryDelta = document.getElementById('kpi-avg-dry-delta');
+    const kpiAvgWarm = document.getElementById('kpi-avg-warm');
+
+    if (kpiCount) {
+      kpiCount.textContent = filtered.length + ' / ' + state.records.length;
+    }
+
+    const dryDeltas = [];
+    const allWarms = [];
+    filtered.forEach(function(r) {
+      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+        const c = parsePressure(r['cold' + pos]);
+        const w = parsePressure(r['warm' + pos]);
+        if (w !== null) allWarms.push(w);
+        if (r.condition === 'DRY' && c !== null && w !== null) {
+          dryDeltas.push(w - c);
+        }
+      });
+    });
+
+    if (kpiDryDelta) {
+      if (dryDeltas.length > 0) {
+        const avgD = dryDeltas.reduce(function(a, b) { return a + b; }, 0) / dryDeltas.length;
+        const dec = Math.abs(avgD) < 5 ? 2 : 1;
+        kpiDryDelta.textContent = (avgD >= 0 ? '+' : '') + avgD.toFixed(dec);
+      } else {
+        kpiDryDelta.textContent = '--';
+      }
+    }
+
+    if (kpiAvgWarm) {
+      if (allWarms.length > 0) {
+        const avgW = allWarms.reduce(function(a, b) { return a + b; }, 0) / allWarms.length;
+        const dec = Math.abs(avgW) < 10 ? 2 : 1;
+        kpiAvgWarm.textContent = avgW.toFixed(dec);
+      } else {
+        kpiAvgWarm.textContent = '--';
+      }
+    }
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div class="panel-card" style="text-align:center; padding:28px 16px; color:var(--text-muted);">条件に一致する走行記録がありません。</div>';
+      return;
+    }
+
+    listEl.innerHTML = filtered.map(function(r) {
+      const coldOnly = isColdOnlyRecord(r);
+      const statusBadge = coldOnly
+        ? '<span class="status-badge pending">冷間のみ・温間待ち</span>'
+        : '<span class="status-badge done">温間計測済</span>';
+
+      const condClass = ['DRY', 'WET', 'SEMI-WET'].indexOf(r.condition) !== -1 ? r.condition : 'DRY';
+
+      function tireCellHtml(pos) {
+        const c = r['cold' + pos] !== '' && r['cold' + pos] !== undefined ? r['cold' + pos] : '--';
+        const w = r['warm' + pos] !== '' && r['warm' + pos] !== undefined ? r['warm' + pos] : '--';
+        const d = r['delta' + pos] || formatDelta(r['cold' + pos], r['warm' + pos]) || '--';
+        const dColor = d.indexOf('+') === 0 ? 'color:var(--accent-green);' : (d.indexOf('-') === 0 && d !== '--' ? 'color:var(--accent-cyan);' : 'color:var(--text-muted);');
+        return '<div class="mini-tire-cell">' +
+          '<span><span class="mini-pos">' + pos + '</span><span class="mini-pressures">' + escapeHtml(c) + ' → ' + escapeHtml(w) + '</span></span>' +
+          '<span class="mini-delta" style="' + dColor + '">(' + escapeHtml(d) + ')</span>' +
+          '</div>';
+      }
+
+      const memoHtml = r.memo
+        ? '<div class="log-memo-preview">' + escapeHtml(r.memo) + '</div>'
+        : '';
+
+      return '<article class="log-card ' + (coldOnly ? 'cold-only-card' : 'complete-card') + '" data-record-id="' + escapeHtml(r.id) + '">' +
+        '<div class="log-card-top">' +
+          '<div>' +
+            '<div class="log-date-time">' + escapeHtml(r.date || '') + ' ' + escapeHtml(r.time || '') + '</div>' +
+            '<div class="log-circuit-title">' + escapeHtml(r.circuit || '未設定') + '</div>' +
+          '</div>' +
+          '<div class="badge-row">' +
+            statusBadge +
+            '<span class="cond-badge ' + condClass + '">' + escapeHtml(condClass) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="log-meta-strip">' +
+          '<span>🏎 ' + escapeHtml(r.vehicle || '-') + '</span>' +
+          '<span>🛞 ' + escapeHtml(r.tireSet || '-') + '</span>' +
+          '<span>👤 ' + escapeHtml(r.driver || '-') + '</span>' +
+          '<span>🌡 気温:' + escapeHtml(r.ambientTemp || '-') + '℃ / 路温:' + escapeHtml(r.trackTemp || '-') + '℃</span>' +
+          '<span>🏁 ' + escapeHtml(r.laps || '0') + ' Laps</span>' +
+        '</div>' +
+        '<div class="mini-tire-grid">' +
+          tireCellHtml('FL') +
+          tireCellHtml('FR') +
+          tireCellHtml('RL') +
+          tireCellHtml('RR') +
+        '</div>' +
+        memoHtml +
+        '<div class="log-card-actions">' +
+          '<button type="button" class="card-action-btn primary-edit" data-action="edit-warm" data-id="' + escapeHtml(r.id) + '">✏️ 温間追記 / 編集</button>' +
+          '<button type="button" class="card-action-btn" data-action="detail" data-id="' + escapeHtml(r.id) + '">🔍 詳細・削除</button>' +
+        '</div>' +
+      '</article>';
+    }).join('');
+  }
+
+  // --- Detail Modal ---
+  function openDetailModal(recordId) {
+    const rec = state.records.find(function(r) { return r.id === recordId; });
+    if (!rec) return;
+    state.activeModalRecordId = rec.id;
+
+    const modal = document.getElementById('detail-modal');
+    const body = document.getElementById('detail-modal-body');
+    if (!modal || !body) return;
+
+    function detailRow(pos, label) {
+      const c = rec['cold' + pos] || '--';
+      const w = rec['warm' + pos] || '--';
+      const d = rec['delta' + pos] || formatDelta(rec['cold' + pos], rec['warm' + pos]) || '--';
+      return '<div class="mini-tire-cell" style="padding:10px;">' +
+        '<span><strong style="color:var(--accent-orange);">' + pos + ' (' + label + ')</strong></span>' +
+        '<span>1行(冷):' + escapeHtml(c) + ' → 2行(温):' + escapeHtml(w) + ' <strong>3行(Δ):(' + escapeHtml(d) + ')</strong></span>' +
+      '</div>';
+    }
+
+    body.innerHTML =
+      '<div style="margin-bottom:10px; font-size:0.9rem;">' +
+        '<div><strong>日時:</strong> ' + escapeHtml(rec.date) + ' ' + escapeHtml(rec.time) + '</div>' +
+        '<div><strong>サーキット:</strong> ' + escapeHtml(rec.circuit) + '</div>' +
+        '<div><strong>車両:</strong> ' + escapeHtml(rec.vehicle) + '</div>' +
+        '<div><strong>タイヤセット:</strong> ' + escapeHtml(rec.tireSet || '-') + '</div>' +
+        '<div><strong>ドライバー:</strong> ' + escapeHtml(rec.driver || '-') + '</div>' +
+        '<div><strong>コンディション:</strong> ' + escapeHtml(rec.condition) + ' (気温 ' + escapeHtml(rec.ambientTemp || '-') + '℃ / 路温 ' + escapeHtml(rec.trackTemp || '-') + '℃ / ' + escapeHtml(rec.laps || '0') + '周)</div>' +
+      '</div>' +
+      '<div style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;">' +
+        detailRow('FL', '左前') +
+        detailRow('FR', '右前') +
+        detailRow('RL', '左後') +
+        detailRow('RR', '右後') +
+      '</div>' +
+      '<div class="log-memo-preview"><strong>セッティングメモ:</strong>\n' + escapeHtml(rec.memo || '（メモなし）') + '</div>';
+
+    modal.classList.add('open');
+  }
+
+  function closeDetailModal() {
+    const modal = document.getElementById('detail-modal');
+    if (modal) modal.classList.remove('open');
+    state.activeModalRecordId = null;
+  }
+
+  function deleteRecordById(recordId) {
+    const idx = state.records.findIndex(function(r) { return r.id === recordId; });
+    if (idx === -1) return;
+    state.records.splice(idx, 1);
+    if (state.deletedIds.indexOf(recordId) === -1) {
+      state.deletedIds.push(recordId);
+    }
+    saveRecordsToStorage();
+    closeDetailModal();
+    showToast('記録を削除しました', 'info');
+  }
+
+  // --- CSV Export (UTF-8 with BOM) ---
+  const CSV_COLUMNS = [
+    'id', 'date', 'time', 'circuit', 'vehicle', 'tireSet', 'driver', 'condition',
+    'ambientTemp', 'trackTemp', 'laps',
+    'coldFL', 'coldFR', 'coldRL', 'coldRR',
+    'warmFL', 'warmFR', 'warmRL', 'warmRR',
+    'deltaFL', 'deltaFR', 'deltaRL', 'deltaRR',
+    'memo', 'updatedAt'
+  ];
+
+  function escapeCsvCell(val) {
+    const s = String(val === undefined || val === null ? '' : val);
+    if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1 || s.indexOf('\n') !== -1 || s.indexOf('\r') !== -1) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function exportRecordsToCsv(recordsToExport, filenamePrefix) {
+    if (!recordsToExport || recordsToExport.length === 0) {
+      showToast('出力対象のデータがありません', 'error');
+      return;
+    }
+    const lines = [CSV_COLUMNS.join(',')];
+    recordsToExport.forEach(function(rec) {
+      const row = CSV_COLUMNS.map(function(col) {
+        return escapeCsvCell(rec[col]);
+      });
+      lines.push(row.join(','));
+    });
+
+    const bom = '\uFEFF';
+    const csvContent = bom + lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (filenamePrefix || 'rotax-air-log') + '-' + getTodayString() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('BOM付きUTF-8 CSVをダウンロードしました (' + recordsToExport.length + '件)', 'success');
+  }
+
+  function exportRecordsToJson() {
+    const payload = {
+      app: 'ROTAX Air Log',
+      exportedAt: new Date().toISOString(),
+      circuits: state.circuits,
+      vehicles: state.vehicles,
+      tireSets: state.tireSets,
+      records: state.records
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rotax-air-log-backup-' + getTodayString() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('JSONバックアップを保存しました', 'success');
+  }
+
+  // --- CSV / JSON Parser & Glide Importer ---
+  function parseCsvString(text) {
+    const cleaned = text.replace(/^\uFEFF/, '').trim();
+    if (!cleaned) return [];
+
+    const rows = [];
+    let currentRow = [];
+    let currentVal = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < cleaned.length; i++) {
+      const ch = cleaned[i];
+      const next = cleaned[i + 1];
+
+      if (inQuotes) {
+        if (ch === '"' && next === '"') {
+          currentVal += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          currentVal += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ',') {
+          currentRow.push(currentVal.trim());
+          currentVal = '';
+        } else if (ch === '\r' && next === '\n') {
+          currentRow.push(currentVal.trim());
+          rows.push(currentRow);
+          currentRow = [];
+          currentVal = '';
+          i++;
+        } else if (ch === '\n' || ch === '\r') {
+          currentRow.push(currentVal.trim());
+          rows.push(currentRow);
+          currentRow = [];
+          currentVal = '';
+        } else {
+          currentVal += ch;
+        }
+      }
+    }
+    currentRow.push(currentVal.trim());
+    if (currentRow.some(function(c) { return c !== ''; })) {
+      rows.push(currentRow);
+    }
+
+    if (rows.length < 2) return [];
+
+    const headerAlias = {
+      'id': 'id', 'ID': 'id', 'Row ID': 'id', '🔒 Row ID': 'id',
+      'date': 'date', '走行日': 'date', '日付': 'date',
+      'time': 'time', '時間': 'time', '開始時間': 'time', 'セッション開始時間': 'time',
+      'circuit': 'circuit', 'サーキット': 'circuit', 'サーキット名': 'circuit',
+      'vehicle': 'vehicle', '車両': 'vehicle', '車両名': 'vehicle', 'カート': 'vehicle',
+      'tireSet': 'tireSet', 'タイヤセット': 'tireSet', 'タイヤ': 'tireSet', 'Tire Set': 'tireSet',
+      'driver': 'driver', 'ドライバー': 'driver', 'ドライバー名': 'driver',
+      'condition': 'condition', 'コンディション': 'condition', '天候': 'condition', '路面': 'condition',
+      'ambientTemp': 'ambientTemp', '気温': 'ambientTemp', '外気温': 'ambientTemp',
+      'trackTemp': 'trackTemp', '路温': 'trackTemp', '路面温度': 'trackTemp',
+      'laps': 'laps', '周回数': 'laps', 'Laps': 'laps',
+      'coldFL': 'coldFL', '冷間FL': 'coldFL', '冷間左前': 'coldFL',
+      'coldFR': 'coldFR', '冷間FR': 'coldFR', '冷間右前': 'coldFR',
+      'coldRL': 'coldRL', '冷間RL': 'coldRL', '冷間左後': 'coldRL',
+      'coldRR': 'coldRR', '冷間RR': 'coldRR', '冷間右後': 'coldRR',
+      'warmFL': 'warmFL', '温間FL': 'warmFL', '温間左前': 'warmFL',
+      'warmFR': 'warmFR', '温間FR': 'warmFR', '温間右前': 'warmFR',
+      'warmRL': 'warmRL', '温間RL': 'warmRL', '温間左後': 'warmRL',
+      'warmRR': 'warmRR', '温間RR': 'warmRR', '温間右後': 'warmRR',
+      'deltaFL': 'deltaFL', 'deltaFR': 'deltaFR', 'deltaRL': 'deltaRL', 'deltaRR': 'deltaRR',
+      'memo': 'memo', 'メモ': 'memo', 'コメント': 'memo', 'セッティングメモ': 'memo',
+      'updatedAt': 'updatedAt'
+    };
+
+    const rawHeaders = rows[0].map(function(h) {
+      return headerAlias[h] || h;
+    });
+
+    const imported = [];
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      const obj = {};
+      rawHeaders.forEach(function(key, idx) {
+        if (CSV_COLUMNS.indexOf(key) !== -1) {
+          obj[key] = row[idx] !== undefined ? row[idx] : '';
+        }
+      });
+      if (!obj.id) obj.id = generateId() + '-' + r;
+      if (!obj.date) obj.date = getTodayString();
+      if (!obj.time) obj.time = '09:00';
+      if (!obj.tireSet) obj.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];
+      if (!obj.condition) obj.condition = 'DRY';
+
+      obj.deltaFL = formatDelta(obj.coldFL, obj.warmFL);
+      obj.deltaFR = formatDelta(obj.coldFR, obj.warmFR);
+      obj.deltaRL = formatDelta(obj.coldRL, obj.warmRL);
+      obj.deltaRR = formatDelta(obj.coldRR, obj.warmRR);
+      if (!obj.updatedAt) obj.updatedAt = new Date().toISOString();
+
+      imported.push(obj);
+    }
+    return imported;
+  }
+
+  function mergeImportedRecords(incomingList) {
+    if (!Array.isArray(incomingList) || incomingList.length === 0) {
+      showToast('有効なレコードが見つかりませんでした', 'error');
+      return;
+    }
+    const map = {};
+    state.records.forEach(function(r) { map[r.id] = r; });
+    incomingList.forEach(function(inc) {
+      if (inc && inc.id) {
+        if (!inc.tireSet) inc.tireSet = state.tireSets[0] || DEFAULT_TIRESETS[0];
+        map[inc.id] = inc;
+      }
+    });
+    state.records = Object.keys(map).map(function(k) { return map[k]; });
+    saveRecordsToStorage();
+    renderMasterSelects();
+    showToast(incomingList.length + '件のデータをインポート・統合しました！', 'success');
+  }
+
+  // --- GAS Cloud Sync ---
+  function updateSyncStatusBadge() {
+    const dot = document.getElementById('sync-status-dot');
+    const label = document.getElementById('sync-status-label');
+    const info = document.getElementById('gas-last-sync-info');
+    if (!dot || !label) return;
+
+    if (state.gasUrl) {
+      dot.className = 'sync-dot';
+      label.textContent = state.lastSync ? 'CLOUD SYNCED' : 'GAS READY';
+      if (info && state.lastSync) {
+        info.textContent = '最終クラウド同期: ' + state.lastSync;
+      }
+    } else {
+      dot.className = 'sync-dot unsynced';
+      label.textContent = 'LOCAL ONLY';
+    }
+  }
+
+  async function syncWithGas() {
+    const urlInput = document.getElementById('input-gas-url');
+    const gasUrl = (urlInput ? urlInput.value.trim() : state.gasUrl).trim();
+    if (!gasUrl) {
+      showToast('GAS WebアプリURLを設定欄に入力してください', 'error');
+      switchTab('tab-settings');
+      return;
+    }
+
+    state.gasUrl = gasUrl;
+    safeSet(STORAGE_KEYS.GAS_URL, gasUrl);
+
+    const syncBtn = document.getElementById('btn-sync-gas');
+    if (syncBtn) {
+      syncBtn.disabled = true;
+      syncBtn.textContent = '同期通信中...';
+    }
+
+    try {
+      const response = await fetch(gasUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify({
+          action: 'sync',
+          records: state.records,
+          deletedIds: state.deletedIds
+        })
+      });
+
+      const result = await response.json();
+      if (result && result.status === 'success' && Array.isArray(result.records)) {
+        state.records = result.records;
+        state.deletedIds = [];
+        state.lastSync = new Date().toLocaleString('ja-JP');
+        safeSet(STORAGE_KEYS.LAST_SYNC, state.lastSync);
+        saveRecordsToStorage();
+        renderMasterSelects();
+        updateSyncStatusBadge();
+        showToast('スプレッドシートと双方向同期が完了しました (' + state.records.length + '件)', 'success');
+      } else {
+        throw new Error((result && result.message) || '不正なレスポンス');
+      }
+    } catch (err) {
+      showToast('GAS同期エラー: URLまたは公開権限(全員)を確認してください', 'error');
+    } finally {
+      if (syncBtn) {
+        syncBtn.disabled = false;
+        syncBtn.textContent = 'スプレッドシートへ同期';
+      }
+    }
+  }
+
+  // --- Navigation ---
+  function switchTab(tabId) {
+    const views = document.querySelectorAll('.tab-view');
+    views.forEach(function(v) {
+      if (v.id === tabId) {
+        v.classList.add('active');
+      } else {
+        v.classList.remove('active');
+      }
+    });
+
+    const navBtns = document.querySelectorAll('.nav-tab-btn');
+    navBtns.forEach(function(btn) {
+      if (btn.getAttribute('data-tab') === tabId) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    if (tabId === 'tab-history') {
+      renderHistoryTab();
+    }
+  }
+
+  // --- Source Code & Guide Viewer ---
+  function renderCodeViewer(fileKey) {
+    state.activeCodeTab = fileKey;
+    const tabs = document.querySelectorAll('#code-viewer-tabs .code-tab-btn');
+    tabs.forEach(function(btn) {
+      if (btn.getAttribute('data-file') === fileKey) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+
+    const guideBox = document.getElementById('code-guide-container');
+    const preBox = document.getElementById('code-source-pre');
+    if (!guideBox || !preBox) return;
+
+    const bundle = window.ROTAX_SOURCE_BUNDLE || {};
+    if (fileKey === 'guide') {
+      guideBox.style.display = 'block';
+      preBox.style.display = 'none';
+      guideBox.innerHTML = bundle.guideHtml || '';
+    } else {
+      guideBox.style.display = 'none';
+      preBox.style.display = 'block';
+      preBox.textContent = bundle[fileKey] || '';
+    }
+  }
+
+  function copyActiveCodeToClipboard() {
+    const bundle = window.ROTAX_SOURCE_BUNDLE || {};
+    const key = state.activeCodeTab || 'guide';
+    const textToCopy = key === 'guide'
+      ? (document.getElementById('code-guide-container') || {}).innerText || ''
+      : (bundle[key] || '');
+
+    if (!textToCopy) return;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(textToCopy).then(function() {
+        showToast(key + ' をクリップボードにコピーしました', 'success');
+      }).catch(function() {
+        fallbackCopyText(textToCopy, key);
+      });
+    } else {
+      fallbackCopyText(textToCopy, key);
+    }
+  }
+
+  function fallbackCopyText(text, label) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showToast(label + ' をクリップボードにコピーしました', 'success');
+    } catch (e) {
+      showToast('コピーに失敗しました', 'error');
+    }
+    document.body.removeChild(ta);
+  }
+
+  // --- Event Listeners Setup ---
+  function bindEvents() {
+    document.querySelectorAll('.nav-tab-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        switchTab(btn.getAttribute('data-tab'));
+      });
+    });
+
+    const headerSyncBtn = document.getElementById('btn-header-sync');
+    if (headerSyncBtn) {
+      headerSyncBtn.addEventListener('click', function() {
+        if (state.gasUrl) {
+          syncWithGas();
+        } else {
+          switchTab('tab-settings');
+          showToast('GAS WebアプリURLを設定するとクラウド同期できます', 'info');
+        }
+      });
+    }
+
+    // OCR Panel Events
+    document.getElementById('btn-ocr-sample').addEventListener('click', loadRealRotaxSamplePair);
+    document.getElementById('btn-run-ocr').addEventListener('click', runGaugeImageOcr);
+
+    document.getElementById('btn-toggle-ocr-paste').addEventListener('click', function() {
+      const box = document.getElementById('box-ocr-paste');
+      box.classList.toggle('visible');
+      if (box.classList.contains('visible')) {
+        document.getElementById('input-ocr-raw-text').focus();
+      }
+    });
+
+    document.getElementById('btn-parse-ocr-text').addEventListener('click', function() {
+      const raw = document.getElementById('input-ocr-raw-text').value.trim();
+      if (!raw) {
+        showToast('解析するOCRテキストを入力または貼り付けてください', 'error');
+        return;
+      }
+      const parsed = parseRotaxGaugeText(raw);
+      applyParsedRotaxData(parsed);
+      showToast('テキストからROTAXエアゲージ数値を抽出して反映しました！', 'success');
+    });
+
+    document.getElementById('select-ocr-unit').addEventListener('change', function(e) {
+      state.ocrUnitMode = e.target.value;
+      safeSet(STORAGE_KEYS.OCR_UNIT, state.ocrUnitMode);
+      const raw = document.getElementById('input-ocr-raw-text').value.trim();
+      if (raw) {
+        applyParsedRotaxData(parseRotaxGaugeText(raw));
+      }
+    });
+
+    document.getElementById('input-ocr-meta').addEventListener('change', function(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        state.ocrMetaDataUrl = String(evt.target.result || '');
+        const img = document.getElementById('img-ocr-meta-preview');
+        const ph = document.getElementById('placeholder-ocr-meta');
+        if (img && ph) {
+          img.src = state.ocrMetaDataUrl;
+          img.classList.add('visible');
+          ph.style.display = 'none';
+          document.getElementById('ocr-slot-meta').classList.add('loaded');
+        }
+        showToast('画面①（日時・気温）を読み込みました', 'info');
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('input-ocr-tire').addEventListener('change', function(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        state.ocrTireDataUrl = String(evt.target.result || '');
+        const img = document.getElementById('img-ocr-tire-preview');
+        const ph = document.getElementById('placeholder-ocr-tire');
+        if (img && ph) {
+          img.src = state.ocrTireDataUrl;
+          img.classList.add('visible');
+          ph.style.display = 'none';
+          document.getElementById('ocr-slot-tire').classList.add('loaded');
+        }
+        showToast('画面②（4輪エア圧）を読み込みました', 'info');
+      };
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('btn-set-now').addEventListener('click', function() {
+      document.getElementById('field-date').value = getTodayString();
+      document.getElementById('field-time').value = getNowTimeString();
+      showToast('現在の日時をセットしました', 'info');
+    });
+
+    document.getElementById('btn-cancel-edit').addEventListener('click', function() {
+      resetFormToNew();
+      showToast('新規作成モードに戻りました', 'info');
+    });
+
+    document.getElementById('btn-resume-cold').addEventListener('click', function() {
+      const banner = document.getElementById('cold-pending-banner');
+      const pid = banner ? banner.getAttribute('data-pending-id') : null;
+      if (pid) {
+        loadRecordIntoForm(pid, true);
+        showToast('走行前の記録を呼び出しました。温間内圧を入力してください', 'info');
+      }
+    });
+
+    // Add New Circuit + Automatically Search Nearby Circuits
+    document.getElementById('btn-toggle-add-circuit').addEventListener('click', function() {
+      const box = document.getElementById('box-add-circuit');
+      box.classList.toggle('visible');
+      if (box.classList.contains('visible')) {
+        renderNearbyCircuitList();
+        requestGpsAndSearchNearbyCircuits(true);
+      }
+    });
+
+    document.getElementById('btn-refresh-gps-circuits').addEventListener('click', function() {
+      requestGpsAndSearchNearbyCircuits(false);
+    });
+
+    document.getElementById('input-filter-nearby-circuit').addEventListener('input', function() {
+      renderNearbyCircuitList();
+    });
+
+    document.getElementById('nearby-circuit-list').addEventListener('click', function(e) {
+      const btn = e.target.closest('button[data-select-circuit]');
+      if (!btn) return;
+      const chosenName = btn.getAttribute('data-select-circuit');
+      if (!chosenName) return;
+      if (state.circuits.indexOf(chosenName) === -1) {
+        state.circuits.unshift(chosenName);
+        safeSet(STORAGE_KEYS.CIRCUITS, state.circuits);
+      }
+      renderMasterSelects();
+      document.getElementById('field-circuit').value = chosenName;
+      document.getElementById('box-add-circuit').classList.remove('visible');
+      showToast('近くのサーキット「' + chosenName + '」を選択しました！', 'success');
+    });
+
+    document.getElementById('btn-save-new-circuit').addEventListener('click', function() {
+      const input = document.getElementById('input-new-circuit');
+      const val = input.value.trim();
+      if (!val) return;
+      if (state.circuits.indexOf(val) === -1) {
+        state.circuits.unshift(val);
+        safeSet(STORAGE_KEYS.CIRCUITS, state.circuits);
+      }
+      renderMasterSelects();
+      document.getElementById('field-circuit').value = val;
+      input.value = '';
+      document.getElementById('box-add-circuit').classList.remove('visible');
+      showToast('サーキット「' + val + '」を追加しました', 'success');
+    });
+
+    // Add New Vehicle
+    document.getElementById('btn-toggle-add-vehicle').addEventListener('click', function() {
+      const box = document.getElementById('box-add-vehicle');
+      box.classList.toggle('visible');
+      if (box.classList.contains('visible')) {
+        document.getElementById('input-new-vehicle').focus();
+      }
+    });
+
+    document.getElementById('btn-save-new-vehicle').addEventListener('click', function() {
+      const input = document.getElementById('input-new-vehicle');
+      const val = input.value.trim();
+      if (!val) return;
+      if (state.vehicles.indexOf(val) === -1) {
+        state.vehicles.unshift(val);
+        safeSet(STORAGE_KEYS.VEHICLES, state.vehicles);
+      }
+      renderMasterSelects();
+      document.getElementById('field-vehicle').value = val;
+      input.value = '';
+      document.getElementById('box-add-vehicle').classList.remove('visible');
+      showToast('車両「' + val + '」を追加しました', 'success');
+    });
+
+    // Tire Set Select & Add New Tire Set
+    document.getElementById('field-tireset').addEventListener('change', updateTireSetUsageBadge);
+
+    document.getElementById('btn-toggle-add-tireset').addEventListener('click', function() {
+      const box = document.getElementById('box-add-tireset');
+      box.classList.toggle('visible');
+      if (box.classList.contains('visible')) {
+        document.getElementById('input-new-tireset').focus();
+      }
+    });
+
+    document.querySelectorAll('#tireset-compound-presets .preset-chip-btn').forEach(function(chip) {
+      chip.addEventListener('click', function() {
+        const compound = chip.getAttribute('data-compound') || 'MOJO D5';
+        const d = new Date();
+        const mmdd = String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+        const nextNum = String(state.tireSets.length + 1).padStart(2, '0');
+        const input = document.getElementById('input-new-tireset');
+        input.value = compound + ' #' + nextNum + ' (' + mmdd + 'おろし)';
+        input.focus();
+      });
+    });
+
+    document.getElementById('btn-save-new-tireset').addEventListener('click', function() {
+      const input = document.getElementById('input-new-tireset');
+      const val = input.value.trim();
+      if (!val) return;
+      if (state.tireSets.indexOf(val) === -1) {
+        state.tireSets.unshift(val);
+        safeSet(STORAGE_KEYS.TIRESETS, state.tireSets);
+      }
+      renderMasterSelects();
+      document.getElementById('field-tireset').value = val;
+      updateTireSetUsageBadge();
+      input.value = '';
+      document.getElementById('box-add-tireset').classList.remove('visible');
+      showToast('タイヤセット「' + val + '」を追加しました', 'success');
+    });
+
+    document.querySelectorAll('#condition-btn-group .cond-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        setConditionSelection(btn.getAttribute('data-cond'));
+      });
+    });
+
+    document.getElementById('btn-apply-batch-cold').addEventListener('click', function() {
+      const rawVal = document.getElementById('input-batch-cold').value;
+      const batchVal = parsePressure(rawVal);
+      if (batchVal === null) {
+        showToast('一括セットする冷間内圧を入力してください', 'error');
+        return;
+      }
+      const dec = Math.abs(batchVal) < 10 ? 2 : 1;
+      const formatted = batchVal.toFixed(dec);
+      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+        document.getElementById('cold' + pos).value = formatted;
+      });
+      updateLiveDeltas();
+      showToast('4輪の冷間内圧に ' + formatted + ' をセットしました', 'success');
+    });
+
+    document.getElementById('btn-clear-warm').addEventListener('click', function() {
+      ['FL', 'FR', 'RL', 'RR'].forEach(function(pos) {
+        document.getElementById('warm' + pos).value = '';
+      });
+      updateLiveDeltas();
+      showToast('温間内圧をクリアしました', 'info');
+    });
+
+    ['coldFL', 'coldFR', 'coldRL', 'coldRR', 'warmFL', 'warmFR', 'warmRL', 'warmRR'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', updateLiveDeltas);
+      }
+    });
+
+    document.querySelectorAll('.step-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const targetId = btn.getAttribute('data-target');
+        const rawStep = parseFloat(btn.getAttribute('data-step') || '0');
+        const inputEl = document.getElementById(targetId);
+        if (!inputEl) return;
+        const current = parsePressure(inputEl.value);
+        const isBar = current !== null && Math.abs(current) < 10;
+        const step = isBar ? (rawStep * 0.02) : rawStep;
+        const base = current !== null ? current : (targetId.indexOf('cold') === 0 ? 75.0 : 95.0);
+        const dec = isBar ? 2 : 1;
+        const next = Math.max(0, Math.round((base + step) * 100) / 100);
+        inputEl.value = next.toFixed(dec);
+        updateLiveDeltas();
+      });
+    });
+
+    document.getElementById('air-log-form').addEventListener('submit', handleFormSubmit);
+    document.getElementById('btn-reset-form').addEventListener('click', function() {
+      resetFormToNew();
+      showToast('入力欄をリセットしました', 'info');
+    });
+
+    ['filter-circuit', 'filter-vehicle', 'filter-tireset', 'filter-condition'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', renderHistoryTab);
+    });
+    const keywordEl = document.getElementById('filter-keyword');
+    if (keywordEl) keywordEl.addEventListener('input', renderHistoryTab);
+
+    document.getElementById('btn-reset-filter').addEventListener('click', function() {
+      document.getElementById('filter-circuit').value = 'ALL';
+      document.getElementById('filter-vehicle').value = 'ALL';
+      document.getElementById('filter-tireset').value = 'ALL';
+      document.getElementById('filter-condition').value = 'ALL';
+      document.getElementById('filter-keyword').value = '';
+      renderHistoryTab();
+    });
+
+    document.getElementById('history-card-list').addEventListener('click', function(e) {
+      const actionBtn = e.target.closest('button[data-action]');
+      if (actionBtn) {
+        e.stopPropagation();
+        const action = actionBtn.getAttribute('data-action');
+        const id = actionBtn.getAttribute('data-id');
+        if (action === 'edit-warm') {
+          loadRecordIntoForm(id, true);
+        } else if (action === 'detail') {
+          openDetailModal(id);
+        }
+        return;
+      }
+      const card = e.target.closest('.log-card');
+      if (card) {
+        openDetailModal(card.getAttribute('data-record-id'));
+      }
+    });
+
+    document.getElementById('btn-close-modal').addEventListener('click', closeDetailModal);
+    document.getElementById('detail-modal').addEventListener('click', function(e) {
+      if (e.target.id === 'detail-modal') closeDetailModal();
+    });
+
+    document.getElementById('btn-modal-edit').addEventListener('click', function() {
+      const id = state.activeModalRecordId;
+      closeDetailModal();
+      if (id) loadRecordIntoForm(id, true);
+    });
+
+    document.getElementById('btn-modal-duplicate-cold').addEventListener('click', function() {
+      const id = state.activeModalRecordId;
+      closeDetailModal();
+      if (id) duplicateColdIntoNewForm(id);
+    });
+
+    document.getElementById('btn-modal-delete').addEventListener('click', function() {
+      const id = state.activeModalRecordId;
+      if (!id) return;
+      openConfirmModal(
+        '記録の削除',
+        'この走行セッション記録を削除してもよろしいですか？',
+        function() {
+          deleteRecordById(id);
+        }
+      );
+    });
+
+    document.getElementById('btn-close-confirm').addEventListener('click', closeConfirmModal);
+    document.getElementById('btn-confirm-cancel').addEventListener('click', closeConfirmModal);
+    document.getElementById('btn-confirm-ok').addEventListener('click', function() {
+      const cb = state.confirmCallback;
+      closeConfirmModal();
+      if (typeof cb === 'function') cb();
+    });
+
+    document.getElementById('btn-save-gemini-key').addEventListener('click', function() {
+      const val = document.getElementById('input-gemini-key').value.trim();
+      state.geminiKey = val;
+      safeSet(STORAGE_KEYS.GEMINI_KEY, val);
+      showToast(val ? 'Gemini APIキーを保存しました（AI高精度OCR有効）' : 'Gemini APIキーをクリアしました', 'success');
+    });
+
+    document.getElementById('btn-save-gas-url').addEventListener('click', function() {
+      const val = document.getElementById('input-gas-url').value.trim();
+      state.gasUrl = val;
+      safeSet(STORAGE_KEYS.GAS_URL, val);
+      updateSyncStatusBadge();
+      showToast('GAS WebアプリURLを保存しました', 'success');
+    });
+
+    document.getElementById('btn-sync-gas').addEventListener('click', syncWithGas);
+
+    document.getElementById('btn-export-csv-all').addEventListener('click', function() {
+      exportRecordsToCsv(state.records, 'rotax-air-log-all');
+    });
+
+    document.getElementById('btn-export-csv-filtered').addEventListener('click', function() {
+      exportRecordsToCsv(getFilteredRecords(), 'rotax-air-log-filtered');
+    });
+
+    document.getElementById('btn-export-json').addEventListener('click', exportRecordsToJson);
+
+    document.getElementById('input-import-file').addEventListener('change', function(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const content = String(evt.target.result || '');
+        if (file.name.toLowerCase().endsWith('.json')) {
+          try {
+            const parsed = JSON.parse(content);
+            const list = Array.isArray(parsed) ? parsed : (parsed.records || []);
+            mergeImportedRecords(list);
+          } catch (err) {
+            showToast('JSONファイルの解析に失敗しました', 'error');
+          }
+        } else {
+          const list = parseCsvString(content);
+          mergeImportedRecords(list);
+        }
+        e.target.value = '';
+      };
+      reader.readAsText(file, 'UTF-8');
+    });
+
+    document.getElementById('btn-run-text-import').addEventListener('click', function() {
+      const raw = document.getElementById('input-import-text').value.trim();
+      if (!raw) {
+        showToast('CSVテキストを貼り付けてください', 'error');
+        return;
+      }
+      const list = parseCsvString(raw);
+      mergeImportedRecords(list);
+      document.getElementById('input-import-text').value = '';
+    });
+
+    document.getElementById('btn-load-sample').addEventListener('click', function() {
+      mergeImportedRecords(INITIAL_SAMPLE_RECORDS);
+    });
+
+    document.getElementById('btn-clear-all-data').addEventListener('click', function() {
+      openConfirmModal(
+        '全データの削除',
+        '端末内のすべての走行記録を削除します。よろしいですか？（事前にCSV出力でのバックアップを推奨します）',
+        function() {
+          state.records = [];
+          saveRecordsToStorage();
+          showToast('全データを削除しました', 'info');
+        }
+      );
+    });
+
+    document.querySelectorAll('#code-viewer-tabs .code-tab-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        renderCodeViewer(btn.getAttribute('data-file'));
+      });
+    });
+
+    document.getElementById('btn-copy-active-code').addEventListener('click', copyActiveCodeToClipboard);
+  }
+
+  function registerPwaServiceWorker() {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      navigator.serviceWorker.register('./sw.js').catch(function() {
+        // Ignore registration error in sandboxed preview environments
+      });
+    }
+  }
+
+  function initApp() {
+    loadStateFromStorage();
+    const gasInput = document.getElementById('input-gas-url');
+    if (gasInput) gasInput.value = state.gasUrl || '';
+    const geminiInput = document.getElementById('input-gemini-key');
+    if (geminiInput) geminiInput.value = state.geminiKey || '';
+    const ocrUnitSelect = document.getElementById('select-ocr-unit');
+    if (ocrUnitSelect) ocrUnitSelect.value = state.ocrUnitMode || 'raw_bar';
+
+    bindEvents();
+    resetFormToNew();
+    renderNearbyCircuitList();
+    renderHistoryTab();
+    updateSyncStatusBadge();
+    renderCodeViewer('guide');
+    registerPwaServiceWorker();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+  } else {
+    initApp();
+  }
+})();

@@ -1,0 +1,26 @@
+{
+  "name": "ROTAX Air Log - Racing Tire Pressure Manager",
+  "short_name": "ROTAX Air Log",
+  "description": "サーキット走行用4輪タイヤ空気圧・タイヤセット管理・ROTAXエアゲージOCR取込PWA",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090b0f",
+  "theme_color": "#ff5500",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='36' fill='%23090b0f'/><circle cx='96' cy='96' r='72' fill='none' stroke='%23ff5500' stroke-width='12' stroke-dasharray='28 10'/><circle cx='96' cy='96' r='44' fill='%23141923' stroke='%2300e5ff' stroke-width='4'/><text x='96' y='105' font-family='sans-serif' font-size='28' font-weight='900' fill='%23ffffff' text-anchor='middle'>kPa</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%23090b0f'/><circle cx='256' cy='256' r='196' fill='none' stroke='%23ff5500' stroke-width='32' stroke-dasharray='75 26'/><circle cx='256' cy='256' r='120' fill='%23141923' stroke='%2300e5ff' stroke-width='10'/><text x='256' y='280' font-family='sans-serif' font-size='76' font-weight='900' fill='%23ffffff' text-anchor='middle'>kPa</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

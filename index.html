@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ff5500">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ROTAX Air Log">
+  <title>ROTAX Air Log - サーキット4輪タイヤ内圧管理PWA</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+</head>
+<body>
+  <!-- Top Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-group">
+        <span class="brand-badge">ROTAX</span>
+        <h1 class="brand-title">AIR LOG</h1>
+      </div>
+      <div class="header-actions">
+        <button type="button" id="btn-header-sync" class="sync-pill" title="クラウド同期ステータス">
+          <span id="sync-status-dot" class="sync-dot"></span>
+          <span id="sync-status-label">LOCAL READY</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main SPA Container -->
+  <main class="app-container">
+
+    <!-- ====================================================================
+         TAB 1: 記録・編集タブ (Record / Edit)
+         ==================================================================== -->
+    <section id="tab-record" class="tab-view active">
+
+      <!-- Edit Mode Banner (shown when editing an existing record) -->
+      <div id="edit-mode-banner" class="edit-mode-banner">
+        <div>
+          <div class="edit-mode-text" id="edit-mode-label">編集モード：温間追記・データ更新中</div>
+          <div style="font-size:0.74rem; color:#cbd5e1;">保存ボタンを押すと選択中の記録を上書き更新します</div>
+        </div>
+        <button type="button" id="btn-cancel-edit" class="mini-action-btn">新規作成へ戻す</button>
+      </div>
+
+      <!-- Quick Resume Banner for Latest Cold-Only Session -->
+      <div id="cold-pending-banner" class="cold-pending-banner">
+        <div class="cold-pending-info">
+          <strong>走行前（冷間のみ）の記録があります</strong>
+          <span id="cold-pending-summary">最新のセッションを呼び出して温間内圧を追記できます</span>
+        </div>
+        <button type="button" id="btn-resume-cold" class="mini-action-btn" style="background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);">温間を追記</button>
+      </div>
+
+      <!-- ROTAX RACING デジタルエアゲージ 2画面キャプチャOCR・AI取込パネル -->
+      <div class="panel-card ocr-panel-card" id="ocr-capture-panel">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar" style="background:var(--accent-cyan);"></span>📷 ROTAX エアゲージ2画面 OCR取込</h2>
+          <button type="button" id="btn-ocr-sample" class="mini-action-btn" style="background:var(--accent-orange); color:#000; border-color:var(--accent-orange);">実機サンプル2枚でテスト</button>
+        </div>
+
+        <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px;">
+          ROTAXゲージの<strong>①日時・気温画面</strong>と<strong>②4輪エア圧画面（1行目:冷間 / 2行目:温間 / 3行目:差分）</strong>を撮影・選択すると、文字起こしして下のフォームへ一括反映します。
+        </p>
+
+        <div class="ocr-slot-grid">
+          <div class="ocr-slot-box" id="ocr-slot-meta">
+            <span class="ocr-slot-title">① 日時・気温画面</span>
+            <span class="ocr-slot-sub">Date / Time / Air(℃) / Test#</span>
+            <div class="ocr-thumb-wrap">
+              <img id="img-ocr-meta-preview" class="ocr-thumb-img" alt="日時・気温画面プレビュー">
+              <span id="placeholder-ocr-meta" class="ocr-thumb-placeholder">例: Date: 19/09/2026<br>Time: 10:58:01<br>Air: 27.3°C</span>
+            </div>
+            <label for="input-ocr-meta" class="ocr-file-label">📸 画面①を選択 / 撮影</label>
+            <input type="file" id="input-ocr-meta" class="ocr-file-input" accept="image/*">
+          </div>
+
+          <div class="ocr-slot-box" id="ocr-slot-tire">
+            <span class="ocr-slot-title">② 4輪エア圧画面</span>
+            <span class="ocr-slot-sub">各輪 1:冷間 / 2:温間 / 3:差分</span>
+            <div class="ocr-thumb-wrap">
+              <img id="img-ocr-tire-preview" class="ocr-thumb-img" alt="4輪エア圧画面プレビュー">
+              <span id="placeholder-ocr-tire" class="ocr-thumb-placeholder">例: FL 1.65 / 2.10 / +0.45<br>FR 1.65 / 1.97 / +0.32<br>RL 1.60 / RR 1.61</span>
+            </div>
+            <label for="input-ocr-tire" class="ocr-file-label">📸 画面②を選択 / 撮影</label>
+            <input type="file" id="input-ocr-tire" class="ocr-file-input" accept="image/*">
+          </div>
+        </div>
+
+        <div class="field-group" style="margin-bottom:8px;">
+          <label class="field-label" for="select-ocr-unit">取り込み時の圧力単位・桁数モード</label>
+          <select id="select-ocr-unit" class="select-control" style="min-height:40px; font-size:0.86rem;">
+            <option value="raw_bar">ゲージ表示値のまま記録 (例: 1.65 → 2.10 / Δ+0.45 bar)</option>
+            <option value="to_kpa">kPaに換算して記録 (×100換算 例: 165.0 → 210.0 / Δ+45.0 kPa)</option>
+          </select>
+        </div>
+
+        <div class="form-grid-2" style="margin-bottom:6px;">
+          <button type="button" id="btn-run-ocr" class="btn-primary" style="min-height:44px; font-size:0.88rem;">🔍 画像をOCR解析して反映</button>
+          <button type="button" id="btn-toggle-ocr-paste" class="btn-secondary" style="min-height:44px; font-size:0.82rem;">📋 OCR文字を直接貼付</button>
+        </div>
+
+        <div id="box-ocr-paste" class="inline-add-box" style="flex-direction:column; margin-top:8px;">
+          <textarea id="input-ocr-raw-text" class="textarea-control" style="min-height:90px; font-family:var(--font-mono); font-size:0.8rem;" placeholder="iPhoneの写真長押し（テキスト認識表示）等でコピーした文字列を貼り付けてください&#10;例:&#10;Date: 19/09/2026 Time: 10:58:01 Air: 27.3°C&#10;1.65 1.65 2.10 1.97 +0.45 21 +0.32&#10;1.60 1.61 1.97 1.93 +0.37 +0.32 - Test 21 +"></textarea>
+          <button type="button" id="btn-parse-ocr-text" class="btn-secondary" style="min-height:40px; font-size:0.84rem; background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);">貼り付けたテキストを解析してフォームへ反映</button>
+        </div>
+
+        <div id="ocr-status-bar" class="ocr-status-bar">
+          <span id="ocr-status-text">OCR解析中...</span>
+        </div>
+
+        <div id="rotax-lcd-preview" class="rotax-lcd-preview">
+          <div class="rotax-lcd-top-meta">
+            <span id="lcd-date">Date: 19/09/2026</span>
+            <span id="lcd-time">Time: 10:58:01</span>
+            <span id="lcd-air">Air: 27.3°C</span>
+          </div>
+          <div class="rotax-lcd-wheels">
+            <div class="rotax-lcd-wheel-box" id="lcd-fl">1.65<br>2.10<br>+0.45</div>
+            <div class="rotax-lcd-axle">█━█<br><span id="lcd-mem-no">21</span><br>█━█</div>
+            <div class="rotax-lcd-wheel-box right" id="lcd-fr">1.65<br>1.97<br>+0.32</div>
+            <div class="rotax-lcd-wheel-box" id="lcd-rl">1.60<br>1.97<br>+0.37</div>
+            <div class="rotax-lcd-axle"></div>
+            <div class="rotax-lcd-wheel-box right" id="lcd-rr">1.61<br>1.93<br>+0.32</div>
+          </div>
+          <div class="rotax-lcd-footer" id="lcd-test-footer">◄ - Test 21 / 22 + ► （フォームへ自動反映済）</div>
+        </div>
+      </div>
+
+      <form id="air-log-form" novalidate>
+        <input type="hidden" id="field-id" value="">
+
+        <!-- 1. 基本セッション情報パネル -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title"><span class="panel-title-bar"></span>SESSION INFO（基本情報）</h2>
+            <button type="button" id="btn-set-now" class="mini-action-btn">現在日時をセット</button>
+          </div>
+
+          <div class="form-grid-2">
+            <div class="field-group">
+              <label class="field-label" for="field-date">走行日 (Date)</label>
+              <input type="date" id="field-date" class="input-control" required>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="field-time">開始時間 (Time)</label>
+              <input type="time" id="field-time" class="input-control" required>
+            </div>
+          </div>
+
+          <!-- サーキット名 (プルダウン + 新規追加 & 現在地周辺サーキット検索) -->
+          <div class="field-group">
+            <div class="field-label-row">
+              <label class="field-label" for="field-circuit">サーキット (Circuit)</label>
+              <button type="button" id="btn-toggle-add-circuit" class="mini-action-btn">+ 新規サーキット追加</button>
+            </div>
+            <select id="field-circuit" class="select-control"></select>
+
+            <!-- 新規サーキット追加 & 近くのサーキット検索ドロワー -->
+            <div id="box-add-circuit" class="add-drawer-panel">
+              <div class="inline-add-row">
+                <input type="text" id="input-new-circuit" class="input-control" placeholder="新しいサーキット名を入力（または下から選択）">
+                <button type="button" id="btn-save-new-circuit" class="mini-action-btn" style="background:var(--accent-orange); color:#000; border-color:var(--accent-orange);">追加</button>
+              </div>
+
+              <div class="nearby-header-row">
+                <span id="nearby-circuit-status" class="nearby-status-text">📍 近くのサーキット（距離順）</span>
+                <button type="button" id="btn-refresh-gps-circuits" class="mini-action-btn">🔄 現在地から再検索</button>
+              </div>
+
+              <input type="text" id="input-filter-nearby-circuit" class="input-control" style="min-height:38px; font-size:0.84rem;" placeholder="都道府県・サーキット名で絞り込み（例: 千葉、瑞浪、鈴鹿）">
+
+              <div id="nearby-circuit-list" class="nearby-circuit-list"></div>
+            </div>
+          </div>
+
+          <!-- 車両名 (プルダウン + 新規追加) -->
+          <div class="field-group">
+            <div class="field-label-row">
+              <label class="field-label" for="field-vehicle">車両名 (Vehicle)</label>
+              <button type="button" id="btn-toggle-add-vehicle" class="mini-action-btn">+ 新規車両追加</button>
+            </div>
+            <select id="field-vehicle" class="select-control"></select>
+            <div id="box-add-vehicle" class="inline-add-box">
+              <input type="text" id="input-new-vehicle" class="input-control" placeholder="新しい車両・シャーシ名を入力">
+              <button type="button" id="btn-save-new-vehicle" class="mini-action-btn" style="background:var(--accent-orange); color:#000; border-color:var(--accent-orange);">追加</button>
+            </div>
+          </div>
+
+          <!-- NEW: タイヤセット (プルダウン + 新規作成メニュー + 累計周回数バッジ) -->
+          <div class="field-group">
+            <div class="field-label-row">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <label class="field-label" for="field-tireset">タイヤセット (Tire Set)</label>
+                <span id="tireset-usage-badge" class="usage-pill">累計: 0周 / 0回</span>
+              </div>
+              <button type="button" id="btn-toggle-add-tireset" class="mini-action-btn">+ 新規タイヤセット追加</button>
+            </div>
+            <select id="field-tireset" class="select-control"></select>
+
+            <!-- 新規タイヤセット作成メニュー -->
+            <div id="box-add-tireset" class="add-drawer-panel">
+              <div style="font-size:0.74rem; color:var(--text-secondary); font-weight:700;">
+                コンパウンドをタップして自動入力、または自由に入力して追加できます：
+              </div>
+              <div class="preset-chip-row" id="tireset-compound-presets">
+                <button type="button" class="preset-chip-btn" data-compound="MOJO D5">MOJO D5</button>
+                <button type="button" class="preset-chip-btn" data-compound="MOJO D2">MOJO D2</button>
+                <button type="button" class="preset-chip-btn" data-compound="MOJO W5 (WET)">MOJO W5 (WET)</button>
+                <button type="button" class="preset-chip-btn" data-compound="BS SL17">BS SL17</button>
+                <button type="button" class="preset-chip-btn" data-compound="DL SLFD">DL SLFD</button>
+                <button type="button" class="preset-chip-btn" data-compound="ADVAN A052">ADVAN A052</button>
+              </div>
+              <div class="inline-add-row">
+                <input type="text" id="input-new-tireset" class="input-control" placeholder="例: MOJO D5 #03 (11/12おろし)">
+                <button type="button" id="btn-save-new-tireset" class="mini-action-btn" style="background:var(--accent-orange); color:#000; border-color:var(--accent-orange);">追加</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ドライバー名 -->
+          <div class="field-group">
+            <label class="field-label" for="field-driver">ドライバー名 (Driver)</label>
+            <input type="text" id="field-driver" class="input-control" placeholder="例: K. Takahashi">
+          </div>
+
+          <!-- コースコンディション (DRY / WET / SEMI-WET) -->
+          <div class="field-group">
+            <span class="field-label">コースコンディション (Condition)</span>
+            <input type="hidden" id="field-condition" value="DRY">
+            <div class="condition-group" id="condition-btn-group">
+              <button type="button" class="cond-btn active" data-cond="DRY">☀ DRY</button>
+              <button type="button" class="cond-btn" data-cond="SEMI-WET">⛅ SEMI-WET</button>
+              <button type="button" class="cond-btn" data-cond="WET">🌧 WET</button>
+            </div>
+          </div>
+
+          <!-- 気温 / 路温 / 周回数 -->
+          <div class="form-grid-3" style="margin-top:10px; margin-bottom:0;">
+            <div class="field-group">
+              <label class="field-label" for="field-ambient-temp">気温 (℃)</label>
+              <input type="number" id="field-ambient-temp" class="input-control" step="0.1" inputmode="decimal" placeholder="27.3">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="field-track-temp">路温 (℃)</label>
+              <input type="number" id="field-track-temp" class="input-control" step="0.1" inputmode="decimal" placeholder="34.0">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="field-laps">周回数 (Laps)</label>
+              <input type="number" id="field-laps" class="input-control" step="1" min="0" inputmode="numeric" placeholder="15">
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 4輪タイヤ内圧ビジュアル入力パネル (2x2 シャシーレイアウト) -->
+        <div class="panel-card" id="tire-section-card">
+          <div class="panel-header">
+            <h2 class="panel-title"><span class="panel-title-bar"></span>TIRE PRESSURE (kPa / bar 4輪内圧)</h2>
+            <button type="button" id="btn-clear-warm" class="mini-action-btn">温間のみクリア</button>
+          </div>
+
+          <!-- 冷間4輪一括セットバー -->
+          <div class="batch-bar">
+            <span class="batch-bar-label">冷間4輪一括セット:</span>
+            <div class="batch-controls">
+              <input type="number" id="input-batch-cold" class="batch-input" step="0.01" inputmode="decimal" value="75.0" aria-label="冷間4輪一括入力値">
+              <button type="button" id="btn-apply-batch-cold" class="mini-action-btn" style="background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);">4輪へ反映</button>
+            </div>
+          </div>
+
+          <div class="chassis-Direction-indicator">▲ FRONT（進行方向・前輪） ▲</div>
+
+          <!-- 2x2 グリッド: 左上 FL / 右上 FR / 左下 RL / 右下 RR -->
+          <div class="chassis-wrapper">
+
+            <!-- FL: 左前 -->
+            <div class="tire-card">
+              <div class="tire-card-header">
+                <span class="tire-pos-badge"><span class="tire-pos-code">FL</span>左前</span>
+                <div class="tire-delta-box">
+                  <span class="tire-delta-label">Δ 上昇値 (3行目)</span>
+                  <span id="delta-FL" class="tire-delta-value">--</span>
+                </div>
+              </div>
+              <div class="pressure-block cold-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">1行目: 冷間 COLD</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="coldFL" class="pressure-input" step="0.01" inputmode="decimal" placeholder="75.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="coldFL" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="coldFL" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="coldFL" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="coldFL" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+              <div class="pressure-block warm-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">2行目: 温間 WARM</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="warmFL" class="pressure-input" step="0.01" inputmode="decimal" placeholder="95.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="warmFL" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="warmFL" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="warmFL" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="warmFL" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- FR: 右前 -->
+            <div class="tire-card">
+              <div class="tire-card-header">
+                <span class="tire-pos-badge"><span class="tire-pos-code">FR</span>右前</span>
+                <div class="tire-delta-box">
+                  <span class="tire-delta-label">Δ 上昇値 (3行目)</span>
+                  <span id="delta-FR" class="tire-delta-value">--</span>
+                </div>
+              </div>
+              <div class="pressure-block cold-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">1行目: 冷間 COLD</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="coldFR" class="pressure-input" step="0.01" inputmode="decimal" placeholder="75.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="coldFR" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="coldFR" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="coldFR" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="coldFR" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+              <div class="pressure-block warm-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">2行目: 温間 WARM</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="warmFR" class="pressure-input" step="0.01" inputmode="decimal" placeholder="95.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="warmFR" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="warmFR" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="warmFR" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="warmFR" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- RL: 左後 -->
+            <div class="tire-card">
+              <div class="tire-card-header">
+                <span class="tire-pos-badge"><span class="tire-pos-code">RL</span>左後</span>
+                <div class="tire-delta-box">
+                  <span class="tire-delta-label">Δ 上昇値 (3行目)</span>
+                  <span id="delta-RL" class="tire-delta-value">--</span>
+                </div>
+              </div>
+              <div class="pressure-block cold-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">1行目: 冷間 COLD</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="coldRL" class="pressure-input" step="0.01" inputmode="decimal" placeholder="75.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="coldRL" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="coldRL" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="coldRL" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="coldRL" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+              <div class="pressure-block warm-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">2行目: 温間 WARM</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="warmRL" class="pressure-input" step="0.01" inputmode="decimal" placeholder="98.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="warmRL" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="warmRL" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="warmRL" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="warmRL" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- RR: 右後 -->
+            <div class="tire-card">
+              <div class="tire-card-header">
+                <span class="tire-pos-badge"><span class="tire-pos-code">RR</span>右後</span>
+                <div class="tire-delta-box">
+                  <span class="tire-delta-label">Δ 上昇値 (3行目)</span>
+                  <span id="delta-RR" class="tire-delta-value">--</span>
+                </div>
+              </div>
+              <div class="pressure-block cold-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">1行目: 冷間 COLD</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="coldRR" class="pressure-input" step="0.01" inputmode="decimal" placeholder="75.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="coldRR" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="coldRR" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="coldRR" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="coldRR" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+              <div class="pressure-block warm-block">
+                <div class="pressure-block-top">
+                  <span class="pressure-type-label">2行目: 温間 WARM</span>
+                  <span class="pressure-unit">kPa/bar</span>
+                </div>
+                <input type="number" id="warmRR" class="pressure-input" step="0.01" inputmode="decimal" placeholder="98.0">
+                <div class="stepper-row">
+                  <button type="button" class="step-btn" data-target="warmRR" data-step="-1.0">-1.0</button>
+                  <button type="button" class="step-btn" data-target="warmRR" data-step="-0.5">-0.5</button>
+                  <button type="button" class="step-btn" data-target="warmRR" data-step="0.5">+0.5</button>
+                  <button type="button" class="step-btn" data-target="warmRR" data-step="1.0">+1.0</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- 4輪平均・前後バランスリアルタイム表示 -->
+          <div class="telemetry-summary-grid">
+            <div class="telemetry-cell">
+              <span class="telemetry-cell-label">冷間 4輪平均</span>
+              <span id="summary-cold-avg" class="telemetry-cell-val">-- kPa</span>
+            </div>
+            <div class="telemetry-cell">
+              <span class="telemetry-cell-label">温間 4輪平均</span>
+              <span id="summary-warm-avg" class="telemetry-cell-val">-- kPa</span>
+            </div>
+            <div class="telemetry-cell">
+              <span class="telemetry-cell-label">平均 Δ上昇値</span>
+              <span id="summary-delta-avg" class="telemetry-cell-val">-- kPa</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. セッティングメモ・コメント -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <h2 class="panel-title"><span class="panel-title-bar"></span>SETTING MEMO（減衰・挙動・メモ）</h2>
+          </div>
+          <div class="field-group">
+            <textarea id="field-memo" class="textarea-control" placeholder="例: リアトレッド1395mm / スプロケ14×81 / 後半アンダーステア傾向、次セットでフロント冷間-2.0kPa調整"></textarea>
+          </div>
+
+          <div class="action-stack">
+            <button type="submit" id="btn-submit-log" class="btn-primary">
+              <span id="btn-submit-text">記録を保存する（冷間のみでも保存可）</span>
+            </button>
+            <button type="button" id="btn-reset-form" class="btn-secondary">入力欄をリセット（新規セッション）</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- ====================================================================
+         TAB 2: 履歴・分析タブ (History / Analysis)
+         ==================================================================== -->
+    <section id="tab-history" class="tab-view">
+
+      <div class="kpi-strip">
+        <div class="kpi-box">
+          <span class="kpi-label">表示件数 / 総数</span>
+          <span id="kpi-count" class="kpi-val">0 / 0</span>
+        </div>
+        <div class="kpi-box">
+          <span class="kpi-label">平均 Δ (DRY)</span>
+          <span id="kpi-avg-dry-delta" class="kpi-val">--</span>
+        </div>
+        <div class="kpi-box">
+          <span class="kpi-label">平均温間内圧</span>
+          <span id="kpi-avg-warm" class="kpi-val">--</span>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>FILTER（絞り込み検索）</h2>
+          <button type="button" id="btn-reset-filter" class="mini-action-btn">条件クリア</button>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="field-group">
+            <label class="field-label" for="filter-circuit">サーキット別</label>
+            <select id="filter-circuit" class="select-control">
+              <option value="ALL">すべてのサーキット</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="filter-vehicle">車両別</label>
+            <select id="filter-vehicle" class="select-control">
+              <option value="ALL">すべての車両</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="field-group">
+            <label class="field-label" for="filter-tireset">タイヤセット別</label>
+            <select id="filter-tireset" class="select-control">
+              <option value="ALL">すべてのタイヤセット</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="filter-condition">コンディション別</label>
+            <select id="filter-condition" class="select-control">
+              <option value="ALL">すべて (ALL)</option>
+              <option value="DRY">DRY</option>
+              <option value="SEMI-WET">SEMI-WET</option>
+              <option value="WET">WET</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-group" style="margin-bottom:0;">
+          <label class="field-label" for="filter-keyword">キーワード検索</label>
+          <input type="text" id="filter-keyword" class="input-control" placeholder="ドライバー・タイヤ・メモ検索">
+        </div>
+      </div>
+
+      <div id="history-card-list" class="history-list"></div>
+    </section>
+
+    <!-- ====================================================================
+         TAB 3: 設定・データ管理タブ (Settings / Data / Cloud Sync / Code)
+         ==================================================================== -->
+    <section id="tab-settings" class="tab-view">
+
+      <!-- 0. AI高精度OCR設定 (Gemini APIキー・任意) -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar" style="background:var(--accent-cyan);"></span>📷 エアゲージAI高精度OCR設定（任意・無料枠対応）</h2>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:8px;">
+          未設定でもブラウザ内蔵OCR（Tesseract.js）とテキスト貼付が無料で動作しますが、Google AI Studioの無料Gemini APIキーを設定すると、反射や傾きのある7セグ液晶写真でもAI画像認識で瞬時に100%近い精度で読み取れます。
+        </p>
+        <div class="field-group">
+          <label class="field-label" for="input-gemini-key">Gemini API Key (`AIzaSy...` / 端末のLocalStorageにのみ保存)</label>
+          <input type="password" id="input-gemini-key" class="input-control" placeholder="AIzaSyXXXXXXXXXXXXXXXXXXXX">
+        </div>
+        <button type="button" id="btn-save-gemini-key" class="btn-secondary" style="margin-top:8px;">Gemini APIキーを保存</button>
+      </div>
+
+      <!-- 1. GAS クラウド同期設定 -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>GOOGLE SPREADSHEET 同期 (GAS連携)</h2>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="input-gas-url">GAS WebアプリURL (`https://script.google.com/macros/s/.../exec`)</label>
+          <input type="url" id="input-gas-url" class="input-control" placeholder="https://script.google.com/macros/s/XXXX/exec">
+        </div>
+        <div class="form-grid-2" style="margin-top:10px;">
+          <button type="button" id="btn-save-gas-url" class="btn-secondary">URLを保存</button>
+          <button type="button" id="btn-sync-gas" class="btn-primary" style="min-height:46px; font-size:0.92rem;">スプレッドシートへ同期</button>
+        </div>
+        <p id="gas-last-sync-info" style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">
+          ※オフライン時はブラウザのLocalStorageに即時保存され、電波のある場所でいつでも双方向マージ同期できます。
+        </p>
+      </div>
+
+      <!-- 2. CSVエクスポート (BOM付きUTF-8) -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>CSV エクスポート / バックアップ出力</h2>
+        </div>
+        <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;">
+          ExcelやGoogleスプレッドシートで文字化けしない <strong>BOM付きUTF-8形式</strong> のCSVファイルをダウンロードします。
+        </p>
+        <div class="form-grid-2">
+          <button type="button" id="btn-export-csv-all" class="btn-primary" style="min-height:46px; font-size:0.88rem;">全データをCSV出力</button>
+          <button type="button" id="btn-export-csv-filtered" class="btn-secondary">絞り込み中データをCSV出力</button>
+        </div>
+        <div style="margin-top:8px;">
+          <button type="button" id="btn-export-json" class="btn-secondary">JSONフルバックアップを保存 (.json)</button>
+        </div>
+      </div>
+
+      <!-- 3. CSVインポート (既存Glideデータ移行対応) / JSON復元 -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>CSV インポート / Glideデータ移行</h2>
+        </div>
+        <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:10px;">
+          既存のGlide（Googleスプレッドシート）から書き出したCSVファイル、または本アプリのバックアップCSV/JSONファイルを読み込んで統合します。
+        </p>
+        <div class="field-group">
+          <label class="field-label" for="input-import-file">CSV または JSON ファイルを選択</label>
+          <input type="file" id="input-import-file" class="input-control" accept=".csv,.json,text/csv,application/json" style="padding-top:9px;">
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="input-import-text">またはCSVテキストを直接貼り付け</label>
+          <textarea id="input-import-text" class="textarea-control" placeholder="id,date,time,circuit,vehicle,tireSet,driver,condition,ambientTemp,trackTemp,laps,coldFL,coldFR,coldRL,coldRR,warmFL,warmFR,warmRL,warmRR,deltaFL,deltaFR,deltaRL,deltaRR,memo"></textarea>
+        </div>
+        <button type="button" id="btn-run-text-import" class="btn-secondary">貼り付けたCSVテキストをインポート</button>
+      </div>
+
+      <!-- 4. マスターリスト管理 & 全データ初期化 -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>データリセット・サンプル復元</h2>
+        </div>
+        <div class="form-grid-2">
+          <button type="button" id="btn-load-sample" class="btn-secondary">サンプル記録を追加</button>
+          <button type="button" id="btn-clear-all-data" class="btn-secondary btn-danger">全記録を削除</button>
+        </div>
+      </div>
+
+      <!-- 5. 構成ファイル一式 & GitHub Pages / GAS 導入手順ビューア -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <h2 class="panel-title"><span class="panel-title-bar"></span>SOURCE FILES &amp; DEPLOY GUIDE</h2>
+          <button type="button" id="btn-copy-active-code" class="mini-action-btn" style="background:var(--accent-orange); color:#000; border-color:var(--accent-orange);">表示中のコードをコピー</button>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:8px;">
+          GitHub Pages公開用の全5ファイル（<code>index.html</code>, <code>style.css</code>, <code>app.js</code>, <code>manifest.json</code>, <code>code.gs</code>）と導入手順をワンタップでコピーできます。
+        </p>
+        <div class="code-tabs" id="code-viewer-tabs">
+          <button type="button" class="code-tab-btn active" data-file="guide">導入手順ガイド</button>
+          <button type="button" class="code-tab-btn" data-file="index.html">index.html</button>
+          <button type="button" class="code-tab-btn" data-file="style.css">style.css</button>
+          <button type="button" class="code-tab-btn" data-file="app.js">app.js</button>
+          <button type="button" class="code-tab-btn" data-file="manifest.json">manifest.json</button>
+          <button type="button" class="code-tab-btn" data-file="code.gs">code.gs</button>
+        </div>
+        <div id="code-guide-container" class="guide-box"></div>
+        <pre id="code-source-pre" class="code-pre" style="display:none;"></pre>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Detail / Delete Confirmation Modal -->
+  <div id="detail-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="detail-modal-title">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h3 id="detail-modal-title" class="modal-title">セッション詳細</h3>
+        <button type="button" id="btn-close-modal" class="modal-close-btn" aria-label="閉じる">✕</button>
+      </div>
+      <div id="detail-modal-body"></div>
+      <div class="action-stack" style="margin-top:14px;">
+        <button type="button" id="btn-modal-edit" class="btn-primary">この記録を編集 / 温間内圧を追記する</button>
+        <button type="button" id="btn-modal-duplicate-cold" class="btn-secondary">この冷間内圧をコピーして新規作成</button>
+        <button type="button" id="btn-modal-delete" class="btn-secondary btn-danger">この記録を削除する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Action Modal -->
+  <div id="confirm-modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+    <div class="modal-sheet" style="max-width:400px;">
+      <div class="modal-header">
+        <h3 id="confirm-modal-title" class="modal-title">確認</h3>
+        <button type="button" id="btn-close-confirm" class="modal-close-btn" aria-label="閉じる">✕</button>
+      </div>
+      <p id="confirm-modal-message" style="font-size:0.92rem; color:var(--text-secondary); margin-bottom:16px;"></p>
+      <div class="form-grid-2" style="margin-bottom:0;">
+        <button type="button" id="btn-confirm-cancel" class="btn-secondary">キャンセル</button>
+        <button type="button" id="btn-confirm-ok" class="btn-secondary btn-danger">実行する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- Bottom Tab Navigation -->
+  <nav class="bottom-nav" aria-label="メインナビゲーション">
+    <div class="bottom-nav-inner">
+      <button type="button" class="nav-tab-btn active" data-tab="tab-record" id="nav-btn-record">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/></svg>
+        <span>記録・編集</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-tab="tab-history" id="nav-btn-history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        <span>履歴・分析</span>
+      </button>
+      <button type="button" class="nav-tab-btn" data-tab="tab-settings" id="nav-btn-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <span>設定・データ管理</span>
+      </button>
+    </div>
+  </nav>
+
+  <script src="app.js"></script>
+</body>
+</html>
