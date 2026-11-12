@@ -101,7 +101,6 @@ function writeAllRecords_(sheet, records) {
     sheet.getRange(2, 1, lastRow - 1, Math.max(sheet.getLastColumn(), HEADERS.length)).clearContent();
   }
 
-  // Ensure header matches current HEADERS
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
 
   if (records.length === 0) return;

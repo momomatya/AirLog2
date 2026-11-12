@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rotax-air-log-v3';
+const CACHE_NAME = 'rotax-air-log-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -33,15 +33,22 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).catch(() => {
+    fetch(event.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const cloned = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cached) => {
+          if (cached) return cached;
           if (event.request.mode === 'navigate') {
             return caches.match('./index.html');
           }
-        })
-      );
-    })
+          return null;
+        });
+      })
   );
 });

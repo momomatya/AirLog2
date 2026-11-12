@@ -63,7 +63,7 @@
         </div>
 
         <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:10px;">
-          ROTAXゲージの<strong>①日時・気温画面</strong>と<strong>②4輪エア圧画面（1行目:冷間 / 2行目:温間 / 3行目:差分）</strong>を撮影・選択すると、文字起こしして下のフォームへ一括反映します。
+          <strong>①日時・気温画面</strong>と<strong>②4輪エア圧画面（1行目:冷間 / 2行目:温間 / 3行目:差分）</strong>を選択すると、<strong>選択した瞬間に自動で読み取って下のフォームへ即時反映</strong>します（2枚同時選択も可）。
         </p>
 
         <div class="ocr-slot-grid">
@@ -75,7 +75,7 @@
               <span id="placeholder-ocr-meta" class="ocr-thumb-placeholder">例: Date: 19/09/2026<br>Time: 10:58:01<br>Air: 27.3°C</span>
             </div>
             <label for="input-ocr-meta" class="ocr-file-label">📸 画面①を選択 / 撮影</label>
-            <input type="file" id="input-ocr-meta" class="ocr-file-input" accept="image/*">
+            <input type="file" id="input-ocr-meta" class="ocr-file-input" accept="image/*" multiple>
           </div>
 
           <div class="ocr-slot-box" id="ocr-slot-tire">
@@ -86,7 +86,7 @@
               <span id="placeholder-ocr-tire" class="ocr-thumb-placeholder">例: FL 1.65 / 2.10 / +0.45<br>FR 1.65 / 1.97 / +0.32<br>RL 1.60 / RR 1.61</span>
             </div>
             <label for="input-ocr-tire" class="ocr-file-label">📸 画面②を選択 / 撮影</label>
-            <input type="file" id="input-ocr-tire" class="ocr-file-input" accept="image/*">
+            <input type="file" id="input-ocr-tire" class="ocr-file-input" accept="image/*" multiple>
           </div>
         </div>
 
@@ -105,7 +105,7 @@
 
         <div id="box-ocr-paste" class="inline-add-box" style="flex-direction:column; margin-top:8px;">
           <textarea id="input-ocr-raw-text" class="textarea-control" style="min-height:90px; font-family:var(--font-mono); font-size:0.8rem;" placeholder="iPhoneの写真長押し（テキスト認識表示）等でコピーした文字列を貼り付けてください&#10;例:&#10;Date: 19/09/2026 Time: 10:58:01 Air: 27.3°C&#10;1.65 1.65 2.10 1.97 +0.45 21 +0.32&#10;1.60 1.61 1.97 1.93 +0.37 +0.32 - Test 21 +"></textarea>
-          <button type="button" id="btn-parse-ocr-text" class="btn-secondary" style="min-height:40px; font-size:0.84rem; background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);">貼り付けたテキストを解析してフォームへ反映</button>
+          <button type="button" id="btn-parse-ocr-text" class="btn-secondary" style="min-height:42px; font-size:0.84rem; background:var(--accent-cyan); color:#000; border-color:var(--accent-cyan);">貼り付けたテキストを解析してフォームへ反映</button>
         </div>
 
         <div id="ocr-status-bar" class="ocr-status-bar">
@@ -114,19 +114,20 @@
 
         <div id="rotax-lcd-preview" class="rotax-lcd-preview">
           <div class="rotax-lcd-top-meta">
-            <span id="lcd-date">Date: 19/09/2026</span>
-            <span id="lcd-time">Time: 10:58:01</span>
-            <span id="lcd-air">Air: 27.3°C</span>
+            <span id="lcd-date">Date: 未読込</span>
+            <span id="lcd-time">Time: 未読込</span>
+            <span id="lcd-air">Air: 未読込</span>
           </div>
           <div class="rotax-lcd-wheels">
-            <div class="rotax-lcd-wheel-box" id="lcd-fl">1.65<br>2.10<br>+0.45</div>
-            <div class="rotax-lcd-axle">█━█<br><span id="lcd-mem-no">21</span><br>█━█</div>
-            <div class="rotax-lcd-wheel-box right" id="lcd-fr">1.65<br>1.97<br>+0.32</div>
-            <div class="rotax-lcd-wheel-box" id="lcd-rl">1.60<br>1.97<br>+0.37</div>
+            <div class="rotax-lcd-wheel-box" id="lcd-fl">FL: 未読込</div>
+            <div class="rotax-lcd-axle">█━█<br><span id="lcd-mem-no">--</span><br>█━█</div>
+            <div class="rotax-lcd-wheel-box right" id="lcd-fr">FR: 未読込</div>
+            <div class="rotax-lcd-wheel-box" id="lcd-rl">RL: 未読込</div>
             <div class="rotax-lcd-axle"></div>
-            <div class="rotax-lcd-wheel-box right" id="lcd-rr">1.61<br>1.93<br>+0.32</div>
+            <div class="rotax-lcd-wheel-box right" id="lcd-rr">RR: 未読込</div>
           </div>
-          <div class="rotax-lcd-footer" id="lcd-test-footer">◄ - Test 21 / 22 + ► （フォームへ自動反映済）</div>
+          <div class="rotax-lcd-footer" id="lcd-test-footer">◄ - ROTAX LCD PREVIEW + ►</div>
+          <button type="button" id="btn-apply-lcd-to-form" class="btn-primary" style="min-height:42px; font-size:0.86rem; margin-top:8px;">⬇️ この読み取り値を下の入力フォームへ反映して確認</button>
         </div>
       </div>
 
@@ -134,7 +135,7 @@
         <input type="hidden" id="field-id" value="">
 
         <!-- 1. 基本セッション情報パネル -->
-        <div class="panel-card">
+        <div class="panel-card" id="session-info-card">
           <div class="panel-header">
             <h2 class="panel-title"><span class="panel-title-bar"></span>SESSION INFO（基本情報）</h2>
             <button type="button" id="btn-set-now" class="mini-action-btn">現在日時をセット</button>
@@ -159,7 +160,6 @@
             </div>
             <select id="field-circuit" class="select-control"></select>
 
-            <!-- 新規サーキット追加 & 近くのサーキット検索ドロワー -->
             <div id="box-add-circuit" class="add-drawer-panel">
               <div class="inline-add-row">
                 <input type="text" id="input-new-circuit" class="input-control" placeholder="新しいサーキット名を入力（または下から選択）">
@@ -190,7 +190,7 @@
             </div>
           </div>
 
-          <!-- NEW: タイヤセット (プルダウン + 新規作成メニュー + 累計周回数バッジ) -->
+          <!-- タイヤセット (プルダウン + 新規作成メニュー + 累計周回数バッジ) -->
           <div class="field-group">
             <div class="field-label-row">
               <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -201,7 +201,6 @@
             </div>
             <select id="field-tireset" class="select-control"></select>
 
-            <!-- 新規タイヤセット作成メニュー -->
             <div id="box-add-tireset" class="add-drawer-panel">
               <div style="font-size:0.74rem; color:var(--text-secondary); font-weight:700;">
                 コンパウンドをタップして自動入力、または自由に入力して追加できます：
@@ -541,7 +540,7 @@
           <h2 class="panel-title"><span class="panel-title-bar" style="background:var(--accent-cyan);"></span>📷 エアゲージAI高精度OCR設定（任意・無料枠対応）</h2>
         </div>
         <p style="font-size:0.78rem; color:var(--text-secondary); margin-bottom:8px;">
-          未設定でもブラウザ内蔵OCR（Tesseract.js）とテキスト貼付が無料で動作しますが、Google AI Studioの無料Gemini APIキーを設定すると、反射や傾きのある7セグ液晶写真でもAI画像認識で瞬時に100%近い精度で読み取れます。
+          未設定でもROTAX液晶認識エンジン＆内蔵OCR（Tesseract.js）が無料で動作しますが、Google AI Studioの無料Gemini APIキーを設定するとAI画像認識も併用できます。
         </p>
         <div class="field-group">
           <label class="field-label" for="input-gemini-key">Gemini API Key (`AIzaSy...` / 端末のLocalStorageにのみ保存)</label>
