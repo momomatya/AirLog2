@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rotax-air-log-v4';
+const CACHE_NAME = '38racing-air-log-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -52,3 +52,4 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
+

@@ -1,5 +1,5 @@
 /**
- * ROTAX Air Log - Google Apps Script (GAS) クラウド同期バックエンド
+ * 38Racing Air Log - Google Apps Script (GAS) クラウド同期バックエンド
  * 
  * 【機能】
  * - doGet(e) : スプレッドシートの全レコードをJSON形式で返却
@@ -224,3 +224,4 @@ function doPost(e) {
     lock.releaseLock();
   }
 }
+
